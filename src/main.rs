@@ -188,6 +188,7 @@ impl World {
             .map(|x| *x == Entity::Wumpus || *x == Entity::Pit)
             .unwrap_or(false)
         {
+            println!("{}", self);
             panic!("The hero is dead");
         }
     }
@@ -248,39 +249,52 @@ type Formula = Vec<Vec<Literal<Var>>>;
 
 trait KnowledgeBase {
     // @return true iff KB |= formula
-    fn ask(&self, formula: Formula) -> bool;
-    fn tell(&mut self, formula: Formula);
+    fn ask(&self, formula: &Formula) -> bool;
+    fn tell(&mut self, formula: &Formula);
 }
 
 impl KnowledgeBase for EncoderSAT<Var> {
-    fn ask(&self, formula: Formula) -> bool {
+    fn ask(&self, formula: &Formula) -> bool {
         let mut dual = self.clone();
-        // TODO: se la formula ha solo una clausola la sostituzione di tseytin si può risparmiare
-        let mut tseytin_clause = vec![];
-        for clause in formula {
-            // crea una variabile di tseitin t per clausola
-            // aggiungi alla KB la clausola (t or clausola)
-            // siano alpha_1 or alpha_2 or ... or alpha_k i letterali della clausola
-            // aggiungi alla KB le clausole (not t or not alpha_1) and ... and (not t or not alpha_k)
-            // aggiungi la clausola (t_1 or t_2 or ... or t_n) dove n è il numero di clausole.
-            let tseytin = dual.create_raw_variable();
-            tseytin_clause.push(tseytin.clone());
-            for literal in &clause {
-                let not_literal = dual.register_literal(literal.not());
-                let not_tseytin = tseytin.not();
-                dual.add_raw_clause(vec![not_literal, not_tseytin]);
-            }
-            let mut raw_clause = dual.register_clause(clause);
-            raw_clause.push(tseytin.clone());
-            dual.add_raw_clause(raw_clause); // aggiunta clausola t or clausola
+        if !dual.picosat_sat() {
+            panic!("Inconsistenza");
         }
-        dual.add_raw_clause(tseytin_clause);
+        if formula.len() < 1 {
+            // TODO: se la formula ha solo una clausola la sostituzione di tseytin si può risparmiare
+            let mut tseytin_clause = vec![];
+            for clause in formula {
+                // crea una variabile di tseitin t per clausola
+                // aggiungi alla KB la clausola (t or clausola)
+                // siano alpha_1 or alpha_2 or ... or alpha_k i letterali della clausola
+                // aggiungi alla KB le clausole (not t or not alpha_1) and ... and (not t or not alpha_k)
+                // aggiungi la clausola (t_1 or t_2 or ... or t_n) dove n è il numero di clausole.
+                let tseytin = dual.create_raw_variable();
+                tseytin_clause.push(tseytin.clone());
+                for literal in clause {
+                    let not_literal = dual.register_literal(literal.not());
+                    let not_tseytin = tseytin.not();
+                    dual.add_raw_clause(vec![not_literal, not_tseytin]);
+                }
+                let mut raw_clause = dual.register_clause(clause.clone());
+                raw_clause.push(tseytin.clone());
+                dual.add_raw_clause(raw_clause); // aggiunta clausola t or clausola
+            }
+            dual.add_raw_clause(tseytin_clause);
+        } else {
+            if let Some(clause) = formula.get(0) {
+                for literal in clause {
+                    dual.add(vec![literal.not()]);
+                }
+            } else {
+                return false;
+            }
+        }
         !dual.picosat_sat() // TODO: generalize for all the solvers
     }
 
-    fn tell(&mut self, formula: Formula) {
+    fn tell(&mut self, formula: &Formula) {
         for clause in formula {
-            self.add(clause);
+            self.add(clause.clone());
         }
     }
 }
@@ -299,10 +313,11 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
             clause.add(Wumpus {
                 pos: Position { x: i, y: j },
             });
-            println!("i,j: {:?}", (i, j));
+            // println!("i,j: {:?}", (i, j));
         }
     }
     kb = clause.end();
+    println!("[INFO] At least one Wumpus");
 
     // la stanza 0 0 è sicura
     clause = kb.clause();
@@ -310,6 +325,7 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
         pos: Position::new(0, 0),
     });
     kb = clause.end();
+    println!("[INFO] The cell 0 0 is safe");
 
     // il wumpus si trova in esattamente una posizione
     // il wumpus non si può trovare in due posizioni diverse
@@ -339,6 +355,8 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
         }
     }
 
+    println!("[INFO] at most one wumpus and one gold");
+
     // l'oro si trova in almeno una posizione
     clause = kb.clause();
     for i in 0..size {
@@ -349,6 +367,7 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
         }
     }
     kb = clause.end();
+    println!("[INFO] at least one gold");
 
     // in una stanza c'è vento se e solo se in una stanza adiacente c'è il pozzo
     let mut vento_implica_pozzi = vec![];
@@ -401,8 +420,10 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
         }
     }
 
+    println!("[INFO] physics of the world");
+
     // se una casella è safe allora non c'è il wumpus e non c'è il pozzo
-    // se in una casella non c'è il wumpus allora è safe
+    // se in una casella non c'è il wumpus e non c'è il pozzo allora è safe
     // se in una casella non c'è un pozzo allora è safe
     for i in 0..size {
         for j in 0..size {
@@ -436,8 +457,10 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
         }
     }
 
+    println!("[INFO] safety rules");
+
     // se il wumpus ha urlato, allora la cella dove stava il wumpus è sicura
-    println!("{:?}", kb);
+    // println!("{:?}", kb);
     // se ha sentito il rumore della freccia sbattere, allora in tutte le celle in cui è passata la freccia non ci sta il wumpus
     kb
 }
@@ -530,7 +553,7 @@ impl Hero {
 
         println!("{:?}", p);
 
-        self.kb.tell(self.create_formula_perception(&p));
+        self.kb.tell(&self.create_formula_perception(&p));
 
         let mut action_to_consider = Vec::with_capacity(9);
 
@@ -549,8 +572,50 @@ impl Hero {
         let mut suitable_actions = vec![];
 
         for a in action_to_consider {
-            if self.kb.ask(self.create_formula_ask(&a, &p.position)) {
+            let formula = self.create_formula_ask(&a, &p.position);
+            if self.kb.ask(&formula) {
+                println!("Inferito: {:?}", formula);
                 suitable_actions.push(a);
+                self.kb.tell(&formula);
+            } else {
+                match a {
+                    Move(dir) => {
+                        if self.kb.ask(&vec![vec![
+                            Var::Wumpus {
+                                pos: p.position.move_clone(dir),
+                            }
+                            .into(),
+                        ]]) {
+                            self.kb.tell(&vec![vec![
+                                Var::Wumpus {
+                                    pos: p.position.move_clone(dir),
+                                }
+                                .into(),
+                            ]]);
+                            println!(
+                                "Ci sta il wumpus in posizione: {:?}",
+                                p.position.move_clone(dir)
+                            );
+                        } else if self.kb.ask(&vec![vec![
+                            Var::Pit {
+                                pos: p.position.move_clone(dir),
+                            }
+                            .into(),
+                        ]]) {
+                            self.kb.tell(&vec![vec![
+                                Var::Pit {
+                                    pos: p.position.move_clone(dir),
+                                }
+                                .into(),
+                            ]]);
+                            println!(
+                                "Ci sta un pozzo in posizione: {:?}",
+                                p.position.move_clone(dir)
+                            );
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -579,8 +644,8 @@ impl Hero {
 }
 
 fn main() {
-    let dim = 4;
-    let mut world = World::new(dim, 1);
+    let dim = 5;
+    let mut world = World::new(dim, 3);
     let mut hero = Hero::new(Box::new(init_kb(dim)));
     print!("{}", world);
     for _ in 0..100 {
