@@ -204,24 +204,26 @@ trait KnowledgeBase {
 impl KnowledgeBase for EncoderSAT<Var> {
     fn ask(&self, formula: Formula) -> bool {
         let mut dual = self.clone();
+        let mut tseytin_clause = vec![];
         for clause in formula {
             // crea una variabile di tseitin t per clausola
             // aggiungi alla KB la clausola (t or clausola)
             // siano alpha_1 or alpha_2 or ... or alpha_k i letterali della clausola
             // aggiungi alla KB le clausole (not t or not alpha_1) and ... and (not t or not alpha_k)
-            // aggiungi la clausola unitaria t
-            let tseitin = dual.create_raw_variable();
+            // aggiungi la clausola (t_1 or t_2 or ... or t_n) dove n è il numero di clausole.
+            let tseytin = dual.create_raw_variable();
+            tseytin_clause.push(tseytin.clone());
             for literal in &clause {
                 let not_literal = dual.register_literal(literal.not());
-                let not_tseitin = tseitin.not();
-                dual.add_raw_clause(vec![not_literal, not_tseitin]);
+                let not_tseytin = tseytin.not();
+                dual.add_raw_clause(vec![not_literal, not_tseytin]);
             }
             let mut raw_clause = dual.register_clause(clause);
-            raw_clause.push(tseitin.clone());
+            raw_clause.push(tseytin.clone());
             dual.add_raw_clause(raw_clause); // aggiunta clausola t or clausola
-            dual.add_raw_clause(vec![tseitin]); // aggiunta clausola unitaria t
         }
-        dual.sat()
+        dual.add_raw_clause(tseytin_clause);
+        !dual.picosat_sat() // TODO: generalize for all the solvers
     }
 
     fn tell(&mut self, formula: Formula) {

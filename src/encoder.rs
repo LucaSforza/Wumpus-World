@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Result};
+use std::io::{BufRead, BufReader, Result, Write};
+use std::process::{Command, Stdio};
 
 type Clause = Vec<Literal<usize>>;
 
@@ -9,6 +10,26 @@ pub struct EncoderSAT<T> {
     clauses: Vec<Clause>,
     counter: usize,
 }
+
+pub fn picosat_is_sat(output: String) -> bool {
+    let mut reader = BufReader::new(output.as_bytes());
+
+    let mut line = String::new();
+    // Read first line
+    if reader
+        .read_line(&mut line)
+        .expect("Could not read the output")
+        == 0
+    {
+        panic!("Could not read first line of the output file");
+    }
+    if line.trim() != "s SATISFIABLE" {
+        false
+    } else {
+        true
+    }
+}
+
 /// Parses the PicoSAT output file and returns a Vec<Option<bool>> where
 /// index 0 is unused, and each index i corresponds to variable i.
 pub fn parse_picosat_model(output: String, nvars: usize) -> Result<Vec<Option<bool>>> {
@@ -146,8 +167,25 @@ impl<T: Clone> EncoderSAT<T> {
         (encoding, variables)
     }
 
-    pub fn sat(&self) -> bool {
-        todo!()
+    pub fn picosat_sat(&self) -> bool {
+        let (encoding, _) = self.encode();
+        let output = Command::new("picosat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                {
+                    let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+                    stdin.write_all(encoding.as_bytes())?;
+                }
+                let output = child.wait_with_output()?;
+                Ok(output)
+            })
+            .expect("Failed to run picosat");
+
+        let picosat_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+        picosat_is_sat(picosat_stdout)
     }
 
     pub fn clause(self) -> ClauseBuilder<T> {
