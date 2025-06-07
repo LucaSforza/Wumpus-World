@@ -3,9 +3,11 @@ use std::io::{BufRead, BufReader, Result};
 
 type Clause = Vec<Literal<usize>>;
 
+#[derive(Default)]
 pub struct EncoderSAT<T> {
     map: HashMap<T, usize>,
     clauses: Vec<Clause>,
+    counter: usize,
 }
 /// Parses the PicoSAT output file and returns a Vec<Option<bool>> where
 /// index 0 is unused, and each index i corresponds to variable i.
@@ -59,6 +61,17 @@ pub fn decode_model<T: Clone>(vars: &[T], model: &[Option<bool>]) -> Vec<(T, Opt
 }
 
 impl<T> EncoderSAT<T> {
+    pub fn create_raw_variable(&mut self) -> Literal<usize> {
+        self.counter += 1;
+        self.counter.into()
+    }
+
+    pub fn add_raw_clause(&mut self, raw_clause: Clause) {
+        self.clauses.push(raw_clause);
+    }
+}
+
+impl<T: Default> EncoderSAT<T> {
     pub fn new() -> Self {
         Self {
             ..Default::default()
@@ -66,33 +79,43 @@ impl<T> EncoderSAT<T> {
     }
 }
 
-impl<T: Eq + std::hash::Hash> EncoderSAT<T> {
-    pub fn add(&mut self, clause: Vec<Literal<T>>) {
-        self.clauses.push(
-            clause
-                .into_iter()
-                .map(|literal| {
-                    let next_id = self.map.len() + 1;
-                    literal.map(|t| *self.map.entry(t).or_insert(next_id))
-                })
-                .collect(),
-        );
-    }
-}
-
-impl<T> Default for EncoderSAT<T> {
-    fn default() -> Self {
+impl<T: Clone> Clone for EncoderSAT<T> {
+    fn clone(&self) -> Self {
         Self {
-            map: Default::default(),
-            clauses: Default::default(),
+            map: self.map.clone(),
+            clauses: self.clauses.clone(),
+            counter: self.counter.clone(),
         }
     }
 }
 
-// TODO: return a printable string
-impl<T: std::fmt::Debug + Clone> EncoderSAT<T> {
+impl<T: Eq + std::hash::Hash> EncoderSAT<T> {
+    pub fn add(&mut self, clause: Vec<Literal<T>>) {
+        let clause = self.register_clause(clause);
+        self.clauses.push(clause);
+    }
+
+    pub fn register_literal(&mut self, literal: Literal<T>) -> Literal<usize> {
+        let old_size = self.map.len();
+        let next_id = self.counter + 1;
+        let result = literal.map(|t| *self.map.entry(t).or_insert(next_id));
+        if self.map.len() > old_size {
+            self.counter += 1
+        }
+        result
+    }
+
+    pub fn register_clause(&mut self, clause: Vec<Literal<T>>) -> Clause {
+        clause
+            .into_iter()
+            .map(|literal| self.register_literal(literal))
+            .collect()
+    }
+}
+
+impl<T: Clone> EncoderSAT<T> {
     pub fn encode(&self) -> (String, Vec<T>) {
-        let variables_number = self.map.len();
+        let variables_number = self.counter;
 
         let mut variables = vec![None; variables_number];
         for (k, v) in &self.map {
@@ -123,6 +146,10 @@ impl<T: std::fmt::Debug + Clone> EncoderSAT<T> {
         (encoding, variables)
     }
 
+    pub fn sat(&self) -> bool {
+        todo!()
+    }
+
     pub fn clause(self) -> ClauseBuilder<T> {
         ClauseBuilder {
             encoder: self,
@@ -131,6 +158,7 @@ impl<T: std::fmt::Debug + Clone> EncoderSAT<T> {
     }
 }
 
+#[derive(Clone)]
 pub enum Literal<T> {
     Pos(T),
     Neg(T),
@@ -144,6 +172,15 @@ impl<T> Literal<T> {
         match self {
             Literal::Pos(t) => Literal::Pos(f(t)),
             Literal::Neg(t) => Literal::Neg(f(t)),
+        }
+    }
+}
+
+impl<T: Copy> Literal<T> {
+    pub fn not(&self) -> Self {
+        match self {
+            Literal::Pos(t) => Literal::Neg(*t),
+            Literal::Neg(t) => Literal::Pos(*t),
         }
     }
 }
@@ -164,10 +201,14 @@ where
     T: std::cmp::Eq + std::hash::Hash,
 {
     pub fn add<U: Into<Literal<T>>>(&mut self, literal: U) {
-        let next_id = self.encoder.map.len() + 1;
+        let old_size = self.encoder.map.len();
+        let next_id = self.encoder.counter + 1;
         let literal = literal
             .into()
             .map(|t| *self.encoder.map.entry(t).or_insert(next_id));
+        if self.encoder.map.len() > old_size {
+            self.encoder.counter += 1;
+        }
 
         self.clause.push(literal);
     }

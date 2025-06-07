@@ -1,8 +1,8 @@
 use rand::{Rng, rngs::ThreadRng};
 
-use std::fmt;
+use std::{fmt, vec};
 
-use crate::encoder::Literal;
+use crate::encoder::{EncoderSAT, Literal};
 
 mod encoder;
 
@@ -174,6 +174,7 @@ impl fmt::Display for World {
     }
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 enum Direction {
     North,
     Sud,
@@ -181,6 +182,7 @@ enum Direction {
     Ovest,
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 enum Var {
     Wumpus { x: usize, y: usize },
     Pit { x: usize, y: usize },
@@ -194,8 +196,39 @@ enum Var {
 type Formula = Vec<Vec<Literal<Var>>>;
 
 trait KnowledgeBase {
-    fn ask(&self, formula: Formula) -> Action;
-    fn tell(&self, formula: Formula);
+    // @return true iff KB |= formula
+    fn ask(&self, formula: Formula) -> bool;
+    fn tell(&mut self, formula: Formula);
+}
+
+impl KnowledgeBase for EncoderSAT<Var> {
+    fn ask(&self, formula: Formula) -> bool {
+        let mut dual = self.clone();
+        for clause in formula {
+            // crea una variabile di tseitin t per clausola
+            // aggiungi alla KB la clausola (t or clausola)
+            // siano alpha_1 or alpha_2 or ... or alpha_k i letterali della clausola
+            // aggiungi alla KB le clausole (not t or not alpha_1) and ... and (not t or not alpha_k)
+            // aggiungi la clausola unitaria t
+            let tseitin = dual.create_raw_variable();
+            for literal in &clause {
+                let not_literal = dual.register_literal(literal.not());
+                let not_tseitin = tseitin.not();
+                dual.add_raw_clause(vec![not_literal, not_tseitin]);
+            }
+            let mut raw_clause = dual.register_clause(clause);
+            raw_clause.push(tseitin.clone());
+            dual.add_raw_clause(raw_clause); // aggiunta clausola t or clausola
+            dual.add_raw_clause(vec![tseitin]); // aggiunta clausola unitaria t
+        }
+        dual.sat()
+    }
+
+    fn tell(&mut self, formula: Formula) {
+        for clause in formula {
+            self.add(clause);
+        }
+    }
 }
 
 enum Action {
@@ -226,11 +259,11 @@ impl Hero {
     }
 
     fn next_action(&mut self, p: Perceptions) -> Action {
-        self.kb.tell(self.create_formula_perception(&p));
-        let action = self.kb.ask(self.create_formula_tell());
-        self.kb.tell(self.create_action_formula(&action));
-        self.t += 1;
-        action
+        // self.kb.tell(self.create_formula_perception(&p));
+        // let action = self.kb.ask(self.create_formula_tell());
+        // self.kb.tell(self.create_action_formula(&action));
+        // self.t += 1;
+        todo!()
     }
 }
 
