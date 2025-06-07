@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::io::{BufRead, BufReader, Result, Write};
 use std::process::{Command, Stdio};
 
@@ -9,6 +10,40 @@ pub struct EncoderSAT<T> {
     map: HashMap<T, usize>,
     clauses: Vec<Clause>,
     counter: usize,
+}
+
+impl<T: Clone + Eq + std::hash::Hash + fmt::Debug> fmt::Debug for EncoderSAT<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Build reverse map: usize -> T
+        let mut reverse_map: HashMap<usize, &T> = HashMap::new();
+        for (t, &id) in &self.map {
+            reverse_map.insert(id, t);
+        }
+
+        for (i, clause) in self.clauses.iter().enumerate() {
+            write!(f, "Clause {}: ", i + 1)?;
+            for literal in clause {
+                match literal {
+                    Literal::Pos(id) => {
+                        if let Some(t) = reverse_map.get(id) {
+                            write!(f, "{:?} ", t)?;
+                        } else {
+                            write!(f, "+?({}) ", id)?;
+                        }
+                    }
+                    Literal::Neg(id) => {
+                        if let Some(t) = reverse_map.get(id) {
+                            write!(f, "-{:?} ", t)?;
+                        } else {
+                            write!(f, "-?({}) ", id)?;
+                        }
+                    }
+                }
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
 }
 
 pub fn picosat_is_sat(output: String) -> bool {
@@ -196,7 +231,7 @@ impl<T: Clone> EncoderSAT<T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Literal<T> {
     Pos(T),
     Neg(T),

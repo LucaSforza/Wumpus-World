@@ -46,6 +46,39 @@ struct Position {
     y: usize,
 }
 
+impl Position {
+    fn new(x: usize, y: usize) -> Self {
+        Self { x: x, y: y }
+    }
+
+    fn move_clone(&self, dir: Direction) -> Self {
+        match dir {
+            Direction::North => Self::new(self.x, self.y - 1),
+            Direction::Sud => Self::new(self.x, self.y + 1),
+            Direction::East => Self::new(self.x + 1, self.y),
+            Direction::Ovest => Self::new(self.x - 1, self.y),
+        }
+    }
+
+    fn move_in(&mut self, dir: Direction) {
+        match dir {
+            Direction::North => self.y -= 1,
+            Direction::Sud => self.y += 1,
+            Direction::East => self.x += 1,
+            Direction::Ovest => self.x -= 1,
+        }
+    }
+
+    fn possible_move(&self, dir: Direction, size: usize) -> bool {
+        match dir {
+            Direction::North => self.y > 0,
+            Direction::Sud => self.y < size - 1,
+            Direction::East => self.x < size - 1,
+            Direction::Ovest => self.x > 0,
+        }
+    }
+}
+
 struct World {
     dungeon: Vec<Vec<Option<Entity>>>,
     hero_pos: Position,
@@ -146,12 +179,7 @@ impl World {
 
     fn do_action(&mut self, action: Action) {
         match action {
-            Action::Move(dir) => match dir {
-                Direction::North => self.hero_pos.y -= 1,
-                Direction::Sud => self.hero_pos.y += 1,
-                Direction::East => self.hero_pos.x += 1,
-                Direction::Ovest => self.hero_pos.x -= 1,
-            },
+            Action::Move(dir) => self.hero_pos.move_in(dir),
             Action::Grab => self.dungeon[self.hero_pos.y][self.hero_pos.x] = None,
             Action::Shoot(dir) => todo!(),
         }
@@ -188,7 +216,7 @@ impl fmt::Display for World {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 enum Direction {
     North,
     Sud,
@@ -196,21 +224,23 @@ enum Direction {
     Ovest,
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 enum Var {
-    Safe { x: usize, y: usize },
-    Wumpus { x: usize, y: usize },
-    Pit { x: usize, y: usize },
-    Gold { x: usize, y: usize },
-    Stench { x: usize, y: usize },
-    Breeze { x: usize, y: usize },
+    Safe { pos: Position },
+    Wumpus { pos: Position },
+    Pit { pos: Position },
+    Gold { pos: Position },
+    Stench { pos: Position },
+    Breeze { pos: Position },
     Howl,
-    Bump { x: usize, y: usize, dir: Direction },
+    Bump { pos: Position, dir: Direction },
 }
 
 impl Default for Var {
     fn default() -> Self {
-        Self::Safe { x: 0, y: 0 }
+        Self::Safe {
+            pos: Position::default(),
+        }
     }
 }
 
@@ -266,9 +296,19 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
 
     for i in 0..size {
         for j in 0..size {
-            clause.add(Wumpus { x: i, y: j });
+            clause.add(Wumpus {
+                pos: Position { x: i, y: j },
+            });
+            println!("i,j: {:?}", (i, j));
         }
     }
+    kb = clause.end();
+
+    // la stanza 0 0 è sicura
+    clause = kb.clause();
+    clause.add(Safe {
+        pos: Position::new(0, 0),
+    });
     kb = clause.end();
 
     // il wumpus si trova in esattamente una posizione
@@ -279,17 +319,19 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
             for x in 0..size {
                 for y in 0..size {
                     if (i, j) != (x, y) {
+                        let pos1 = Position::new(i, j);
+                        let pos2 = Position::new(x, y);
                         // il wumpus si trova in esattamente una posizione
                         // il wumpus non si può trovare in due posizioni diverse
                         clause = kb.clause();
-                        clause.add(Neg(Wumpus { x: i, y: j }));
-                        clause.add(Neg(Wumpus { x: x, y: y }));
+                        clause.add(Neg(Wumpus { pos: pos1 }));
+                        clause.add(Neg(Wumpus { pos: pos2 }));
                         kb = clause.end();
                         // l'oro si trova esattamente in una posizone
                         // l'oro non si può trovare in due posizioni diverse
                         clause = kb.clause();
-                        clause.add(Neg(Gold { x: i, y: j }));
-                        clause.add(Neg(Gold { x: x, y: y }));
+                        clause.add(Neg(Gold { pos: pos1 }));
+                        clause.add(Neg(Gold { pos: pos2 }));
                         kb = clause.end();
                     }
                 }
@@ -301,7 +343,9 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
     clause = kb.clause();
     for i in 0..size {
         for j in 0..size {
-            clause.add(Gold { x: i, y: j });
+            clause.add(Gold {
+                pos: Position { x: i, y: j },
+            });
         }
     }
     kb = clause.end();
@@ -313,65 +357,42 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
     let mut puzza_implica_wumpus = vec![];
     // let mut wumpus_implica_puzza = vec![];
 
+    use Direction::*;
+
     for i in 0..size {
         for j in 0..size {
-            vento_implica_pozzi.push(Neg(Breeze { x: i, y: j }));
-            puzza_implica_wumpus.push(Neg(Stench { x: i, y: j }));
-            if i != 0 {
-                // vento_implica_pozzo
-                clause = kb.clause();
-                clause.add(Neg(Pit { x: i, y: j }));
-                clause.add(Breeze { x: i - 1, y: j });
-                kb = clause.end();
-                vento_implica_pozzi.push(Pit { x: i - 1, y: j }.into());
-                // puzza_implica_wumpus
-                clause = kb.clause();
-                clause.add(Neg(Wumpus { x: i, y: j }));
-                clause.add(Breeze { x: i - 1, y: j });
-                kb = clause.end();
-                puzza_implica_wumpus.push(Wumpus { x: i - 1, y: j }.into());
-            }
-            if i != size - 1 {
-                // vento_implica_pozzo
-                clause = kb.clause();
-                clause.add(Neg(Pit { x: i, y: j }));
-                clause.add(Breeze { x: i + 1, y: j });
-                kb = clause.end();
-                vento_implica_pozzi.push(Pit { x: i + 1, y: j }.into());
-                // puzza_implica_wumpus
-                clause = kb.clause();
-                clause.add(Neg(Wumpus { x: i, y: j }));
-                clause.add(Breeze { x: i + 1, y: j });
-                kb = clause.end();
-                puzza_implica_wumpus.push(Wumpus { x: i + 1, y: j }.into());
-            }
-            if j != 0 {
-                // vento_implica_pozzo
-                clause = kb.clause();
-                clause.add(Neg(Pit { x: i, y: j }));
-                clause.add(Breeze { x: i, y: j - 1 });
-                kb = clause.end();
-                vento_implica_pozzi.push(Pit { x: i, y: j - 1 }.into());
-                // puzza_implica_wumpus
-                clause = kb.clause();
-                clause.add(Neg(Wumpus { x: i, y: j }));
-                clause.add(Breeze { x: i, y: j - 1 });
-                kb = clause.end();
-                puzza_implica_wumpus.push(Wumpus { x: i, y: j - 1 }.into());
-            }
-            if j != size - 1 {
-                // vento_implica_pozzo
-                clause = kb.clause();
-                clause.add(Neg(Pit { x: i, y: j }));
-                clause.add(Breeze { x: i, y: j + 1 });
-                kb = clause.end();
-                vento_implica_pozzi.push(Pit { x: i, y: j + 1 }.into());
-                // puzza_implica_wumpus
-                clause = kb.clause();
-                clause.add(Neg(Wumpus { x: i, y: j }));
-                clause.add(Breeze { x: i, y: j + 1 });
-                kb = clause.end();
-                puzza_implica_wumpus.push(Wumpus { x: i, y: j + 1 }.into());
+            let pos = Position::new(i, j);
+            vento_implica_pozzi.push(Neg(Breeze { pos: pos }));
+            puzza_implica_wumpus.push(Neg(Stench { pos: pos }));
+            for dir in [North, Sud, East, Ovest] {
+                if pos.possible_move(dir, size) {
+                    // vento_implica_pozzo
+                    clause = kb.clause();
+                    clause.add(Neg(Pit { pos: pos }));
+                    clause.add(Breeze {
+                        pos: pos.move_clone(dir),
+                    });
+                    kb = clause.end();
+                    vento_implica_pozzi.push(
+                        Pit {
+                            pos: pos.move_clone(dir),
+                        }
+                        .into(),
+                    );
+                    // puzza_implica_wumpus
+                    clause = kb.clause();
+                    clause.add(Neg(Wumpus { pos: pos }));
+                    clause.add(Stench {
+                        pos: pos.move_clone(dir),
+                    });
+                    kb = clause.end();
+                    puzza_implica_wumpus.push(
+                        Wumpus {
+                            pos: pos.move_clone(dir),
+                        }
+                        .into(),
+                    );
+                }
             }
             kb.add(vento_implica_pozzi);
             kb.add(puzza_implica_wumpus);
@@ -380,31 +401,44 @@ fn init_kb(size: usize) -> EncoderSAT<Var> {
         }
     }
 
-    // se in una casella non c'è il Wumpus e non c'è il fossato allora è sicura
-
-    // se una casella è sicura allora non c'è il Wumpus e non c'è il fossato
+    // se una casella è safe allora non c'è il wumpus e non c'è il pozzo
+    // se in una casella non c'è il wumpus allora è safe
+    // se in una casella non c'è un pozzo allora è safe
     for i in 0..size {
         for j in 0..size {
             clause = kb.clause();
-            // (-W and -P) -> S
-            // -(-W and -P) or S
-            // W or P or S
-            clause.add(Wumpus { x: i, y: j });
-            clause.add(Pit { x: i, y: j });
-            clause.add(Safe { x: i, y: j });
+            clause.add(Safe {
+                pos: Position::new(i, j),
+            });
+            clause.add(Wumpus {
+                pos: Position::new(i, j),
+            });
+            clause.add(Pit {
+                pos: Position::new(i, j),
+            });
             kb = clause.end();
-
             clause = kb.clause();
-            clause.add(Neg(Safe { x: i, y: j }));
-            clause.add(Neg(Wumpus { x: i, y: j }));
+            clause.add(Neg(Safe {
+                pos: Position::new(i, j),
+            }));
+            clause.add(Neg(Pit {
+                pos: Position::new(i, j),
+            }));
             kb = clause.end();
-
             clause = kb.clause();
-            clause.add(Neg(Safe { x: i, y: j }));
-            clause.add(Neg(Pit { x: i, y: j }));
+            clause.add(Neg(Safe {
+                pos: Position::new(i, j),
+            }));
+            clause.add(Neg(Wumpus {
+                pos: Position::new(i, j),
+            }));
             kb = clause.end();
         }
     }
+
+    // se il wumpus ha urlato, allora la cella dove stava il wumpus è sicura
+    println!("{:?}", kb);
+    // se ha sentito il rumore della freccia sbattere, allora in tutte le celle in cui è passata la freccia non ci sta il wumpus
     kb
 }
 
@@ -419,6 +453,7 @@ struct Hero {
     kb: Box<dyn KnowledgeBase>,
     t: usize, // time
     visited: HashSet<Position>,
+    rng: ThreadRng,
 }
 
 impl Hero {
@@ -427,6 +462,7 @@ impl Hero {
             kb: kb,
             t: 0,
             visited: HashSet::new(),
+            rng: rand::rng(),
         }
     }
 
@@ -434,29 +470,17 @@ impl Hero {
         use Var::*;
 
         let mut formula = Vec::new();
-        let mut var: Literal<Var> = Breeze {
-            x: p.position.x,
-            y: p.position.y,
-        }
-        .into();
+        let mut var: Literal<Var> = Breeze { pos: p.position }.into();
         if !p.breeze {
             var = var.not();
         }
         formula.push(vec![var]);
-        var = Gold {
-            x: p.position.x,
-            y: p.position.y,
-        }
-        .into();
+        var = Gold { pos: p.position }.into();
         if !p.glitter {
             var = var.not();
         }
         formula.push(vec![var]);
-        var = Stench {
-            x: p.position.x,
-            y: p.position.y,
-        }
-        .into();
+        var = Stench { pos: p.position }.into();
         if !p.stench {
             var = var.not();
         }
@@ -471,37 +495,13 @@ impl Hero {
         use Var::*;
 
         match *a {
-            Action::Move(direction) => match direction {
-                Direction::North => vec![vec![
-                    Safe {
-                        x: pos.x,
-                        y: pos.y - 1,
-                    }
-                    .into(),
-                ]],
-                Direction::Sud => vec![vec![
-                    Safe {
-                        x: pos.x,
-                        y: pos.y + 1,
-                    }
-                    .into(),
-                ]],
-                Direction::East => vec![vec![
-                    Safe {
-                        x: pos.x + 1,
-                        y: pos.y,
-                    }
-                    .into(),
-                ]],
-                Direction::Ovest => vec![vec![
-                    Safe {
-                        x: pos.x - 1,
-                        y: pos.y,
-                    }
-                    .into(),
-                ]],
-            },
-            Action::Grab => vec![vec![Gold { x: pos.x, y: pos.y }.into()]],
+            Action::Move(direction) => vec![vec![
+                Safe {
+                    pos: pos.move_clone(direction),
+                }
+                .into(),
+            ]],
+            Action::Grab => vec![vec![Gold { pos: *pos }.into()]],
             Action::Shoot(direction) => todo!(),
         }
     }
@@ -512,36 +512,13 @@ impl Hero {
 
     fn utility(&self, a: &Action, p: &Position) -> i32 {
         match *a {
-            Action::Move(direction) => match direction {
-                Direction::North => {
-                    if self.visited.contains(&Position { x: p.x, y: p.y - 1 }) {
-                        -1
-                    } else {
-                        0
-                    }
+            Action::Move(direction) => {
+                if self.visited.contains(&p.move_clone(direction)) {
+                    -1
+                } else {
+                    0
                 }
-                Direction::Sud => {
-                    if self.visited.contains(&Position { x: p.x, y: p.y + 1 }) {
-                        -1
-                    } else {
-                        0
-                    }
-                }
-                Direction::East => {
-                    if self.visited.contains(&Position { x: p.x + 1, y: p.y }) {
-                        -1
-                    } else {
-                        0
-                    }
-                }
-                Direction::Ovest => {
-                    if self.visited.contains(&Position { x: p.x - 1, y: p.y }) {
-                        -1
-                    } else {
-                        0
-                    }
-                }
-            },
+            }
             Action::Grab => i32::MAX,
             Action::Shoot(direction) => todo!(),
         }
@@ -557,20 +534,10 @@ impl Hero {
 
         let mut action_to_consider = Vec::with_capacity(9);
 
-        if p.position.x != p.board_size - 1 {
-            action_to_consider.push(Move(East));
-        }
-
-        if p.position.x != 0 {
-            action_to_consider.push(Move(Ovest));
-        }
-
-        if p.position.y != 0 {
-            action_to_consider.push(Move(North));
-        }
-
-        if p.position.y != p.board_size - 1 {
-            action_to_consider.push(Move(Sud));
+        for dir in [North, Sud, East, Ovest] {
+            if p.position.possible_move(dir, p.board_size) {
+                action_to_consider.push(Move(dir));
+            }
         }
 
         if p.glitter {
@@ -587,9 +554,19 @@ impl Hero {
             }
         }
 
-        let best = suitable_actions
-            .into_iter()
-            .max_by_key(|a| self.utility(a, &p.position));
+        let mut best = None;
+        let mut best_utility = i32::MIN;
+        for action in suitable_actions {
+            let new_utility = self.utility(&action, &p.position);
+            if new_utility > best_utility {
+                best = action.into();
+                best_utility = new_utility;
+            } else if new_utility == best_utility {
+                if self.rng.random_bool(0.5) {
+                    best = action.into();
+                }
+            }
+        }
         if let Some(a) = best {
             // self.kb.tell(self.create_action_tell(&a));
             self.t += 1;
@@ -602,10 +579,11 @@ impl Hero {
 }
 
 fn main() {
-    let mut world = World::new(5, 3);
-    let mut hero = Hero::new(Box::new(init_kb(5)));
+    let dim = 4;
+    let mut world = World::new(dim, 1);
+    let mut hero = Hero::new(Box::new(init_kb(dim)));
     print!("{}", world);
-    for t in 0..10 {
+    for _ in 0..100 {
         let p = world.perceptions();
         let a = hero.next_action(p);
         world.do_action(a);
