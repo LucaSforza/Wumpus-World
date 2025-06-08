@@ -499,10 +499,9 @@ impl Hero {
         }
         formula.push(vec![var]);
         var = Gold { pos: p.position }.into();
-        if !p.glitter {
-            var = var.not();
+        if p.glitter {
+            formula.push(vec![var]);
         }
-        formula.push(vec![var]);
         var = Stench { pos: p.position }.into();
         if !p.stench {
             var = var.not();
