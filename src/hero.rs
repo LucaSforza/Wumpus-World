@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, process::exit};
 
 use rand::{Rng, rngs::ThreadRng};
 
@@ -91,6 +91,11 @@ impl Hero {
         use crate::world::Direction::*;
 
         println!("{:?}", p);
+
+        if !self.kb.consistency() {
+            println!("[FATAL ERROR] Inconsistency found in the knowledge base");
+            exit(1);
+        }
 
         self.kb.tell(&self.create_formula_perception(&p));
         let mut suitable_actions = vec![];

@@ -27,16 +27,14 @@ pub type Formula = Vec<Vec<Literal<Var>>>;
 
 pub trait KnowledgeBase {
     // @return true iff KB |= formula
-    fn ask(&self, formula: &Formula) -> bool;
+    fn ask(&mut self, formula: &Formula) -> bool;
     fn tell(&mut self, formula: &Formula);
+    fn consistency(&mut self) -> bool;
 }
 
 impl KnowledgeBase for EncoderSAT<Var> {
-    fn ask(&self, formula: &Formula) -> bool {
+    fn ask(&mut self, formula: &Formula) -> bool {
         let mut dual = self.clone();
-        if !dual.picosat_sat() {
-            panic!("Inconsistenza");
-        }
         if formula.len() < 1 {
             // TODO: se la formula ha solo una clausola la sostituzione di tseytin si può risparmiare
             let mut tseytin_clause = vec![];
@@ -74,6 +72,10 @@ impl KnowledgeBase for EncoderSAT<Var> {
         for clause in formula {
             self.add(clause.clone());
         }
+    }
+
+    fn consistency(&mut self) -> bool {
+        self.picosat_sat()
     }
 }
 
