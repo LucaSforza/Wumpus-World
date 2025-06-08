@@ -19,12 +19,14 @@ pub struct Hero {
 
 impl Hero {
     pub fn new(kb: Box<dyn KnowledgeBase>) -> Self {
+        let mut safe = HashSet::new();
+        safe.insert(Position::new(0, 0));
         Self {
             kb: kb,
             t: 0,
             visited: HashSet::new(),
             dangeours: HashSet::new(),
-            safe: HashSet::new(),
+            safe: safe,
             rng: rand::rng(),
         }
     }

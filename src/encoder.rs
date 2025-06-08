@@ -5,11 +5,29 @@ use std::process::{Command, Stdio};
 
 type Clause = Vec<Literal<usize>>;
 
+#[derive(Debug)]
+struct Snapshot<T> {
+    last_var_counter: usize,
+    last_len_clauses: usize,
+    new_vars: Vec<T>,
+}
+
+impl<T> From<&mut EncoderSAT<T>> for Snapshot<T> {
+    fn from(value: &mut EncoderSAT<T>) -> Self {
+        Self {
+            last_var_counter: value.counter,
+            last_len_clauses: value.clauses.len(),
+            new_vars: Vec::new(),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct EncoderSAT<T> {
     map: HashMap<T, usize>,
     clauses: Vec<Clause>,
     counter: usize,
+    snapshot: Option<Snapshot<T>>,
 }
 
 impl<T: Clone + Eq + std::hash::Hash + fmt::Debug> fmt::Debug for EncoderSAT<T> {
@@ -116,7 +134,7 @@ pub fn decode_model<T: Clone>(vars: &[T], model: &[Option<bool>]) -> Vec<(T, Opt
         .collect()
 }
 
-impl<T> EncoderSAT<T> {
+impl<T: fmt::Debug> EncoderSAT<T> {
     pub fn create_raw_variable(&mut self) -> Literal<usize> {
         self.counter += 1;
         self.counter.into()
@@ -124,6 +142,15 @@ impl<T> EncoderSAT<T> {
 
     pub fn add_raw_clause(&mut self, raw_clause: Clause) {
         self.clauses.push(raw_clause);
+    }
+
+    pub fn snapshot(&mut self) {
+        assert!(
+            self.snapshot.is_none(),
+            "there is a snapshot in the Encoder, please consider rewinding before taking another snaposhot"
+        );
+        self.snapshot = Snapshot::from(&mut *self).into();
+        // println!("{:?}", self.snapshot);
     }
 }
 
@@ -135,17 +162,7 @@ impl<T: Default> EncoderSAT<T> {
     }
 }
 
-impl<T: Clone> Clone for EncoderSAT<T> {
-    fn clone(&self) -> Self {
-        Self {
-            map: self.map.clone(),
-            clauses: self.clauses.clone(),
-            counter: self.counter.clone(),
-        }
-    }
-}
-
-impl<T: Eq + std::hash::Hash> EncoderSAT<T> {
+impl<T: Eq + std::hash::Hash + Clone + fmt::Debug> EncoderSAT<T> {
     pub fn add(&mut self, clause: Vec<Literal<T>>) {
         let clause = self.register_clause(clause);
         self.clauses.push(clause);
@@ -154,9 +171,14 @@ impl<T: Eq + std::hash::Hash> EncoderSAT<T> {
     pub fn register_literal(&mut self, literal: Literal<T>) -> Literal<usize> {
         let old_size = self.map.len();
         let next_id = self.counter + 1;
-        let result = literal.map(|t| *self.map.entry(t).or_insert(next_id));
+        let result = literal
+            .clone() // ugly :(
+            .map(|t| *self.map.entry(t).or_insert(next_id));
         if self.map.len() > old_size {
-            self.counter += 1
+            self.counter += 1;
+            if let Some(snapshot) = self.snapshot.as_mut() {
+                snapshot.new_vars.push(literal.inner());
+            }
         }
         result
     }
@@ -166,6 +188,23 @@ impl<T: Eq + std::hash::Hash> EncoderSAT<T> {
             .into_iter()
             .map(|literal| self.register_literal(literal))
             .collect()
+    }
+
+    pub fn rewind(&mut self) {
+        let snapshot = self
+            .snapshot
+            .as_ref()
+            .expect("rewinding the Endored without a snapshot");
+        // println!("Rewind: {:?}, new len: {}", snapshot, self.clauses.len());
+        self.counter = snapshot.last_var_counter;
+        while snapshot.last_len_clauses < self.clauses.len() {
+            // TODO: controllare se esiste un modo O(1) per fare la stessa cosa
+            self.clauses.pop();
+        }
+        for var in &snapshot.new_vars {
+            self.map.remove(var);
+        }
+        self.snapshot = None;
     }
 }
 
@@ -278,19 +317,11 @@ pub struct ClauseBuilder<T> {
 
 impl<T> ClauseBuilder<T>
 where
-    T: std::cmp::Eq + std::hash::Hash,
+    T: std::cmp::Eq + std::hash::Hash + Clone + fmt::Debug,
 {
     pub fn add<U: Into<Literal<T>>>(&mut self, literal: U) {
-        let old_size = self.encoder.map.len();
-        let next_id = self.encoder.counter + 1;
-        let literal = literal
-            .into()
-            .map(|t| *self.encoder.map.entry(t).or_insert(next_id));
-        if self.encoder.map.len() > old_size {
-            self.encoder.counter += 1;
-        }
-
-        self.clause.push(literal);
+        self.clause
+            .push(self.encoder.register_literal(literal.into()));
     }
 
     pub fn end(mut self) -> EncoderSAT<T> {

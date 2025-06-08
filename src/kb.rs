@@ -34,8 +34,10 @@ pub trait KnowledgeBase {
 
 impl KnowledgeBase for EncoderSAT<Var> {
     fn ask(&mut self, formula: &Formula) -> bool {
-        let mut dual = self.clone();
-        if formula.len() < 1 {
+        // let mut dual = self.clone();
+        let result: bool;
+        self.snapshot(); // prendi una foto dello stato della KB
+        if formula.len() > 1 {
             // TODO: se la formula ha solo una clausola la sostituzione di tseytin si può risparmiare
             let mut tseytin_clause = vec![];
             for clause in formula {
@@ -44,28 +46,31 @@ impl KnowledgeBase for EncoderSAT<Var> {
                 // siano alpha_1 or alpha_2 or ... or alpha_k i letterali della clausola
                 // aggiungi alla KB le clausole (not t or not alpha_1) and ... and (not t or not alpha_k)
                 // aggiungi la clausola (t_1 or t_2 or ... or t_n) dove n è il numero di clausole.
-                let tseytin = dual.create_raw_variable();
+                let tseytin = self.create_raw_variable();
                 tseytin_clause.push(tseytin.clone());
                 for literal in clause {
-                    let not_literal = dual.register_literal(literal.not());
+                    let not_literal = self.register_literal(literal.not());
                     let not_tseytin = tseytin.not();
-                    dual.add_raw_clause(vec![not_literal, not_tseytin]);
+                    self.add_raw_clause(vec![not_literal, not_tseytin]);
                 }
-                let mut raw_clause = dual.register_clause(clause.clone());
+                let mut raw_clause = self.register_clause(clause.clone());
                 raw_clause.push(tseytin.clone());
-                dual.add_raw_clause(raw_clause); // aggiunta clausola t or clausola
+                self.add_raw_clause(raw_clause); // aggiunta clausola t or clausola
             }
-            dual.add_raw_clause(tseytin_clause);
+            self.add_raw_clause(tseytin_clause);
         } else {
             if let Some(clause) = formula.get(0) {
                 for literal in clause {
-                    dual.add(vec![literal.not()]);
+                    self.add(vec![literal.not()]);
                 }
             } else {
+                self.rewind(); // rimuovi lo snapshot
                 return false;
             }
         }
-        !dual.picosat_sat() // TODO: generalize for all the solvers
+        result = !self.picosat_sat(); // TODO: generalize for all the solvers
+        self.rewind(); // rimuovi le modifiche e lo snapshot della KB
+        return result;
     }
 
     fn tell(&mut self, formula: &Formula) {
@@ -75,7 +80,11 @@ impl KnowledgeBase for EncoderSAT<Var> {
     }
 
     fn consistency(&mut self) -> bool {
-        self.picosat_sat()
+        let result = self.picosat_sat();
+        if !result {
+            println!("{:?}", self);
+        }
+        result
     }
 }
 
