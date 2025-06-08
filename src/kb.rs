@@ -115,6 +115,7 @@ impl KnowledgeBase for EncoderSAT<Var> {
             ]],
             Action::Grab => vec![vec![Gold { pos: *p }.into()]],
             Action::Shoot(direction) => todo!(),
+            Action::Exit => todo!(),
         }
     }
     fn create_ground_truth_from_perception(p: &Perceptions) -> Self::Query {

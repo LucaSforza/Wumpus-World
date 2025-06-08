@@ -15,6 +15,7 @@ pub enum Action {
     Move(Direction),
     Grab,
     Shoot(Direction),
+    Exit,
 }
 type Dungeon = Vec<Vec<Option<Entity>>>;
 
@@ -183,6 +184,19 @@ impl World {
             Action::Move(dir) => self.hero_pos.move_in(dir),
             Action::Grab => self.dungeon[self.hero_pos.y][self.hero_pos.x] = None,
             Action::Shoot(dir) => todo!(),
+            Action::Exit => {
+                if self.hero_pos == Position::new(0, 0) {
+                    // TODO: check if the hero took the gold
+                    println!("[SUCCESS] The Hero succesfuly exit the dungeon");
+                    exit(0);
+                } else {
+                    println!(
+                        "[FATAL ERROR] The agent exited the dangeon in the position: {:?} But he can exit only in the position (0,0)",
+                        self.hero_pos
+                    );
+                    exit(1);
+                }
+            }
         }
         if self.dungeon[self.hero_pos.y][self.hero_pos.x]
             .as_ref()
