@@ -40,12 +40,14 @@ impl KnowledgeBase for EncoderSAT<Var> {
             let mut tseytin_clause = vec![];
             for clause in formula {
                 // la formula da aggiungere alla KB è (t_1 or t_2 or ... or t_n) and (t_1 <-> not c_1) and ... and (t_n <-> not c_2)
-                // che sarebbe inferenzialmente equivalente alla formula di input negata
-                // crea una variabile di tseitin t per clausola
-                // aggiungi alla KB la clausola (t or clausola)
-                // siano alpha_1 or alpha_2 or ... or alpha_k i letterali della clausola
-                // aggiungi alla KB le clausole (not t or not alpha_1) and ... and (not t or not alpha_k)
-                // aggiungi la clausola (t_1 or t_2 or ... or t_n) dove n è il numero di clausole.
+                // dove c_1, c_2, ..., c_n sono le clausole della formula in input originale (non negata)
+                // Questa nuova formula è inferenzialmente equivalente alla formula di partenza negata.
+                // Però dobbiamo renderla in CNF in questo modo:
+                // Crea una variabile di tseytin t_i per clausola c_i
+                // aggiungi alla KB la clausola (t_i or c_i)
+                // siano alpha_1 or alpha_2 or ... or alpha_k i letterali della clausola c_i
+                // aggiungi alla KB le clausole (not t_i or not alpha_1) and ... and (not t_i or not alpha_k)
+                // aggiungi la clausola (t_1 or t_2 or ... or t_n)
                 let tseytin = self.create_raw_variable();
                 tseytin_clause.push(tseytin.clone());
                 for literal in clause {
