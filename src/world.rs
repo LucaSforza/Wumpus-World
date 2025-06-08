@@ -1,6 +1,6 @@
 use std::fmt;
 
-use rand::{Rng, rngs::ThreadRng};
+use rand::Rng;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -86,7 +86,6 @@ pub struct World {
     dungeon: Vec<Vec<Option<Entity>>>,
     hero_pos: Position,
     arrow: bool,
-    rng: ThreadRng,
 }
 
 impl World {
@@ -112,7 +111,6 @@ impl World {
         World {
             dungeon: dungeon,
             hero_pos: Position { x: 0, y: 0 },
-            rng: rng,
             arrow: true,
         }
     }
