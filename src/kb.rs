@@ -34,13 +34,13 @@ pub trait KnowledgeBase {
 
 impl KnowledgeBase for EncoderSAT<Var> {
     fn ask(&mut self, formula: &Formula) -> bool {
-        // let mut dual = self.clone();
         let result: bool;
         self.snapshot(); // prendi una foto dello stato della KB
         if formula.len() > 1 {
-            // TODO: se la formula ha solo una clausola la sostituzione di tseytin si può risparmiare
             let mut tseytin_clause = vec![];
             for clause in formula {
+                // la formula da aggiungere alla KB è (t_1 or t_2 or ... or t_n) and (t_1 <-> not c_1) and ... and (t_n <-> not c_2)
+                // che sarebbe inferenzialmente equivalente alla formula di input negata
                 // crea una variabile di tseitin t per clausola
                 // aggiungi alla KB la clausola (t or clausola)
                 // siano alpha_1 or alpha_2 or ... or alpha_k i letterali della clausola
