@@ -247,6 +247,13 @@ impl<T> Literal<T> {
             Literal::Neg(t) => Literal::Neg(f(t)),
         }
     }
+
+    pub fn inner(self) -> T {
+        match self {
+            Literal::Pos(t) => t,
+            Literal::Neg(t) => t,
+        }
+    }
 }
 
 impl<T: Copy> Literal<T> {

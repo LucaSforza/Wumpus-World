@@ -476,6 +476,8 @@ struct Hero {
     kb: Box<dyn KnowledgeBase>,
     t: usize, // time
     visited: HashSet<Position>,
+    dangeours: HashSet<Position>,
+    safe: HashSet<Position>,
     rng: ThreadRng,
 }
 
@@ -485,6 +487,8 @@ impl Hero {
             kb: kb,
             t: 0,
             visited: HashSet::new(),
+            dangeours: HashSet::new(),
+            safe: HashSet::new(),
             rng: rand::rng(),
         }
     }
@@ -553,12 +557,18 @@ impl Hero {
         println!("{:?}", p);
 
         self.kb.tell(&self.create_formula_perception(&p));
-
+        let mut suitable_actions = vec![];
         let mut action_to_consider = Vec::with_capacity(9);
 
         for dir in [North, Sud, East, Ovest] {
-            if p.position.possible_move(dir, p.board_size) {
-                action_to_consider.push(Move(dir));
+            if p.position.possible_move(dir, p.board_size)
+                && !self.dangeours.contains(&p.position.move_clone(dir))
+            {
+                if self.safe.contains(&p.position.move_clone(dir)) {
+                    suitable_actions.push(Move(dir));
+                } else {
+                    action_to_consider.push(Move(dir));
+                }
             }
         }
 
@@ -568,14 +578,22 @@ impl Hero {
 
         // TODO: add arrow
 
-        let mut suitable_actions = vec![];
-
         for a in action_to_consider {
             let formula = self.create_formula_ask(&a, &p.position);
             if self.kb.ask(&formula) {
                 println!("Inferito: {:?}", formula);
                 suitable_actions.push(a);
                 self.kb.tell(&formula);
+                for clause in formula {
+                    for literal in clause.into_iter().map(|x| x.inner()) {
+                        match literal {
+                            Var::Safe { pos } => {
+                                self.safe.insert(pos);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             } else {
                 match a {
                     Move(dir) => {
@@ -595,6 +613,7 @@ impl Hero {
                                 "Ci sta il wumpus in posizione: {:?}",
                                 p.position.move_clone(dir)
                             );
+                            self.dangeours.insert(p.position.move_clone(dir));
                         } else if self.kb.ask(&vec![vec![
                             Var::Pit {
                                 pos: p.position.move_clone(dir),
@@ -611,6 +630,7 @@ impl Hero {
                                 "Ci sta un pozzo in posizione: {:?}",
                                 p.position.move_clone(dir)
                             );
+                            self.dangeours.insert(p.position.move_clone(dir));
                         }
                     }
                     _ => {}
