@@ -7,8 +7,8 @@ use crate::{hero::Hero, kb::init_kb, world::World};
 
 fn main() {
     let dim = 5;
-    let mut world = World::new(dim, 4);
-    let mut hero = Hero::new(Box::new(init_kb(dim)));
+    let mut world = World::new(dim, 3);
+    let mut hero = Hero::new(init_kb(dim));
     print!("{}", world);
     for _ in 0..100 {
         let p = world.perceptions();

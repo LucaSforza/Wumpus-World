@@ -1,6 +1,9 @@
 use crate::{
-    encoder::{EncoderSAT, Literal, Literal::Neg},
-    world::{Direction, Position},
+    encoder::{
+        EncoderSAT,
+        Literal::{self, Neg},
+    },
+    world::{Action, Direction, Perceptions, Position},
 };
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
@@ -26,13 +29,24 @@ impl Default for Var {
 pub type Formula = Vec<Vec<Literal<Var>>>;
 
 pub trait KnowledgeBase {
+    type Query;
+
     // @return true iff KB |= formula
-    fn ask(&mut self, formula: &Formula) -> bool;
-    fn tell(&mut self, formula: &Formula);
+    fn ask(&mut self, formula: &Self::Query) -> bool;
+    fn tell(&mut self, formula: &Self::Query);
+
     fn consistency(&mut self) -> bool;
+
+    fn create_query_from_action(a: &Action, p: &Position) -> Self::Query;
+    fn create_ground_truth_from_perception(p: &Perceptions) -> Self::Query;
+
+    fn is_unsafe(&mut self, p: Position) -> bool;
+    fn safe_positions(&self, query: Self::Query) -> Vec<Position>;
 }
 
 impl KnowledgeBase for EncoderSAT<Var> {
+    type Query = Formula;
+
     fn ask(&mut self, formula: &Formula) -> bool {
         let result: bool;
         self.snapshot(); // prendi una foto dello stato della KB
@@ -85,6 +99,74 @@ impl KnowledgeBase for EncoderSAT<Var> {
         let result = self.picosat_sat();
         if !result {
             println!("{:?}", self);
+        }
+        result
+    }
+
+    fn create_query_from_action(a: &Action, p: &Position) -> Self::Query {
+        use Var::*;
+
+        match *a {
+            Action::Move(direction) => vec![vec![
+                Safe {
+                    pos: p.move_clone(direction),
+                }
+                .into(),
+            ]],
+            Action::Grab => vec![vec![Gold { pos: *p }.into()]],
+            Action::Shoot(direction) => todo!(),
+        }
+    }
+    fn create_ground_truth_from_perception(p: &Perceptions) -> Self::Query {
+        use Var::*;
+
+        let mut formula = Vec::new();
+        let mut var: Literal<Var> = Breeze { pos: p.position }.into();
+        if !p.breeze {
+            var = var.not();
+        }
+        formula.push(vec![var]);
+        var = Gold { pos: p.position }.into();
+        if p.glitter {
+            formula.push(vec![var]);
+        }
+        var = Stench { pos: p.position }.into();
+        if !p.stench {
+            var = var.not();
+        }
+        formula.push(vec![var]);
+
+        // TODO: bump and howl
+
+        formula
+    }
+
+    fn is_unsafe(&mut self, p: Position) -> bool {
+        if self.ask(&vec![vec![Var::Wumpus { pos: p }.into()]]) {
+            self.tell(&vec![vec![Var::Wumpus { pos: p }.into()]]);
+            println!("[INFO] Wumpus in position: {:?}", p);
+            // self.dangeours.insert(p.position.move_clone(dir));
+            return true;
+        } else if self.ask(&vec![vec![Var::Pit { pos: p }.into()]]) {
+            self.tell(&vec![vec![Var::Pit { pos: p }.into()]]);
+            println!("[INFO] Pit in position: {:?}", p);
+            // self.dangeours.insert(p.position.move_clone(dir));
+            return true;
+        }
+        return false;
+    }
+
+    fn safe_positions(&self, query: Self::Query) -> Vec<Position> {
+        let mut result = vec![];
+        for clause in query {
+            for literal in clause.into_iter().map(|x| x.inner()) {
+                match literal {
+                    Var::Safe { pos } => {
+                        result.push(pos);
+                    }
+                    _ => {}
+                }
+            }
         }
         result
     }

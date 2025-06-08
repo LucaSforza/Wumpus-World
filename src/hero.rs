@@ -1,4 +1,4 @@
-use std::{collections::HashSet, process::exit};
+use std::{collections::HashSet, fmt, process::exit};
 
 use rand::{Rng, rngs::ThreadRng};
 
@@ -8,8 +8,14 @@ use crate::{
     world::{Action, Perceptions, Position},
 };
 
-pub struct Hero {
-    kb: Box<dyn KnowledgeBase>,
+enum Objective {
+    TakeGold,
+    GoHome,
+}
+
+pub struct Hero<K> {
+    kb: K,
+    obj: Objective,
     t: usize, // time
     visited: HashSet<Position>,
     dangeours: HashSet<Position>,
@@ -17,8 +23,8 @@ pub struct Hero {
     rng: ThreadRng,
 }
 
-impl Hero {
-    pub fn new(kb: Box<dyn KnowledgeBase>) -> Self {
+impl<K> Hero<K> {
+    pub fn new(kb: K) -> Self {
         let mut safe = HashSet::new();
         safe.insert(Position::new(0, 0));
         Self {
@@ -28,53 +34,11 @@ impl Hero {
             dangeours: HashSet::new(),
             safe: safe,
             rng: rand::rng(),
+            obj: Objective::TakeGold,
         }
     }
 
-    fn create_formula_perception(&self, p: &Perceptions) -> Formula {
-        use crate::kb::Var::*;
-
-        let mut formula = Vec::new();
-        let mut var: Literal<Var> = Breeze { pos: p.position }.into();
-        if !p.breeze {
-            var = var.not();
-        }
-        formula.push(vec![var]);
-        var = Gold { pos: p.position }.into();
-        if p.glitter {
-            formula.push(vec![var]);
-        }
-        var = Stench { pos: p.position }.into();
-        if !p.stench {
-            var = var.not();
-        }
-        formula.push(vec![var]);
-
-        // TODO: bump and howl
-
-        formula
-    }
-
-    fn create_formula_ask(&self, a: &Action, pos: &Position) -> Formula {
-        use crate::kb::Var::*;
-
-        match *a {
-            Action::Move(direction) => vec![vec![
-                Safe {
-                    pos: pos.move_clone(direction),
-                }
-                .into(),
-            ]],
-            Action::Grab => vec![vec![Gold { pos: *pos }.into()]],
-            Action::Shoot(direction) => todo!(),
-        }
-    }
-
-    fn create_action_tell(&self, a: &Action) -> Formula {
-        todo!()
-    }
-
-    fn utility(&self, a: &Action, p: &Position) -> i32 {
+    fn utility_take_gold(&mut self, a: &Action, p: &Position) -> i32 {
         match *a {
             Action::Move(direction) => {
                 if self.visited.contains(&p.move_clone(direction)) {
@@ -88,6 +52,27 @@ impl Hero {
         }
     }
 
+    fn utility_go_home(&mut self, a: &Action, p: &Position) -> i32 {
+        match *a {
+            Action::Move(direction) => {
+                // costruisci un piano da dove ti trovi adesso fino alla destinazione (0,0)
+                // preferisci le celle che ti avicinano in quel piano
+                todo!()
+            }
+            Action::Grab => i32::MAX,
+            Action::Shoot(direction) => todo!(),
+        }
+    }
+
+    fn utility(&mut self, a: &Action, p: &Position) -> i32 {
+        match self.obj {
+            Objective::TakeGold => self.utility_take_gold(a, p),
+            Objective::GoHome => self.utility_go_home(a, p),
+        }
+    }
+}
+
+impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
     pub fn next_action(&mut self, p: Perceptions) -> Action {
         use crate::world::Action::*;
         use crate::world::Direction::*;
@@ -99,7 +84,7 @@ impl Hero {
             exit(1);
         }
 
-        self.kb.tell(&self.create_formula_perception(&p));
+        self.kb.tell(&K::create_ground_truth_from_perception(&p));
         let mut suitable_actions = vec![];
         let mut action_to_consider = Vec::with_capacity(9);
 
@@ -117,62 +102,24 @@ impl Hero {
 
         if p.glitter {
             action_to_consider.push(Grab);
+            self.obj = Objective::GoHome;
         }
 
         // TODO: add arrow
 
         for a in action_to_consider {
-            let formula = self.create_formula_ask(&a, &p.position);
+            let formula = K::create_query_from_action(&a, &p.position);
             if self.kb.ask(&formula) {
                 println!("Inferito: {:?}", formula);
                 suitable_actions.push(a);
                 self.kb.tell(&formula);
-                for clause in formula {
-                    for literal in clause.into_iter().map(|x| x.inner()) {
-                        match literal {
-                            Var::Safe { pos } => {
-                                self.safe.insert(pos);
-                            }
-                            _ => {}
-                        }
-                    }
+                for pos in self.kb.safe_positions(formula).into_iter() {
+                    self.safe.insert(pos);
                 }
             } else {
                 match a {
                     Move(dir) => {
-                        if self.kb.ask(&vec![vec![
-                            Var::Wumpus {
-                                pos: p.position.move_clone(dir),
-                            }
-                            .into(),
-                        ]]) {
-                            self.kb.tell(&vec![vec![
-                                Var::Wumpus {
-                                    pos: p.position.move_clone(dir),
-                                }
-                                .into(),
-                            ]]);
-                            println!(
-                                "Ci sta il wumpus in posizione: {:?}",
-                                p.position.move_clone(dir)
-                            );
-                            self.dangeours.insert(p.position.move_clone(dir));
-                        } else if self.kb.ask(&vec![vec![
-                            Var::Pit {
-                                pos: p.position.move_clone(dir),
-                            }
-                            .into(),
-                        ]]) {
-                            self.kb.tell(&vec![vec![
-                                Var::Pit {
-                                    pos: p.position.move_clone(dir),
-                                }
-                                .into(),
-                            ]]);
-                            println!(
-                                "Ci sta un pozzo in posizione: {:?}",
-                                p.position.move_clone(dir)
-                            );
+                        if self.kb.is_unsafe(p.position.move_clone(dir)) {
                             self.dangeours.insert(p.position.move_clone(dir));
                         }
                     }
