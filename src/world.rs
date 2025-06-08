@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, process::exit};
 
 use rand::Rng;
 
@@ -190,7 +190,8 @@ impl World {
             .unwrap_or(false)
         {
             println!("{}", self);
-            panic!("The hero is dead");
+            println!("[ERROR] The hero is dead");
+            exit(1);
         }
     }
 }

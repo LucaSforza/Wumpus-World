@@ -142,17 +142,24 @@ impl KnowledgeBase for EncoderSAT<Var> {
     }
 
     fn is_unsafe(&mut self, p: Position) -> bool {
-        if self.ask(&vec![vec![Var::Wumpus { pos: p }.into()]]) {
-            self.tell(&vec![vec![Var::Wumpus { pos: p }.into()]]);
-            println!("[INFO] Wumpus in position: {:?}", p);
-            // self.dangeours.insert(p.position.move_clone(dir));
-            return true;
-        } else if self.ask(&vec![vec![Var::Pit { pos: p }.into()]]) {
-            self.tell(&vec![vec![Var::Pit { pos: p }.into()]]);
-            println!("[INFO] Pit in position: {:?}", p);
-            // self.dangeours.insert(p.position.move_clone(dir));
+        use Var::*;
+
+        let phi = vec![vec![Wumpus { pos: p }.into(), Pit { pos: p }.into()]];
+
+        if self.ask(&phi) {
+            self.tell(&phi);
+            println!("[INFO] Position {:?} is UNSAFE", p);
+            if self.ask(&vec![vec![Pit { pos: p }.into()]]) {
+                self.tell(&vec![vec![Pit { pos: p }.into()]]);
+                println!("[INFO] Pit in position: {:?}", p);
+            } else {
+                self.tell(&vec![vec![Wumpus { pos: p }.into()]]);
+                println!("[INFO] Wumpus in position: {:?}", p);
+            };
+
             return true;
         }
+
         return false;
     }
 

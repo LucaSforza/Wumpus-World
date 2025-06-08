@@ -53,15 +53,16 @@ impl<K> Hero<K> {
     }
 
     fn utility_go_home(&mut self, a: &Action, p: &Position) -> i32 {
-        match *a {
-            Action::Move(direction) => {
-                // costruisci un piano da dove ti trovi adesso fino alla destinazione (0,0)
-                // preferisci le celle che ti avicinano in quel piano
-                todo!()
-            }
-            Action::Grab => i32::MAX,
-            Action::Shoot(direction) => todo!(),
-        }
+        self.utility_take_gold(a, p)
+        // match *a {
+        //     Action::Move(direction) => {
+        //         // costruisci un piano da dove ti trovi adesso fino alla destinazione (0,0)
+        //         // preferisci le celle che ti avicinano in quel piano
+        //         todo!()
+        //     }
+        //     Action::Grab => i32::MAX,
+        //     Action::Shoot(direction) => todo!(),
+        // }
     }
 
     fn utility(&mut self, a: &Action, p: &Position) -> i32 {
@@ -110,7 +111,7 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
         for a in action_to_consider {
             let formula = K::create_query_from_action(&a, &p.position);
             if self.kb.ask(&formula) {
-                println!("Inferito: {:?}", formula);
+                println!("[INFO] Inferred: {:?}", formula);
                 suitable_actions.push(a);
                 self.kb.tell(&formula);
                 for pos in self.kb.safe_positions(formula).into_iter() {
@@ -147,7 +148,8 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
             self.visited.insert(p.position);
             return a;
         } else {
-            panic!("no action possible");
+            println!("[ERROR] no action possible");
+            exit(1);
         }
     }
 }
