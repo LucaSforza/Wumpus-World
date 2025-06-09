@@ -11,7 +11,7 @@ use crate::{
 
 use agent::{
     problem::{Problem, SuitableState, Utility},
-    statexplorer::resolver::AStarExplorer,
+    statexplorer::resolver::{AStarExplorer, BFSExplorer},
 };
 
 use agent::problem::CostructSolution;
@@ -62,33 +62,37 @@ enum Objective {
     GoHome,
 }
 
-fn h(p: &Position) -> i32 {
+fn distance_to_zero(p: &Position) -> i32 {
     p.x as i32 + p.y as i32
 }
 
-struct FindPlan<'a> {
-    dest: Position,
-    world_map: &'a HashSet<Position>,
-    size_map: usize,
-    suitable: fn(Position, Position) -> bool,
+fn no_heuristic(_p: &Position) -> i32 {
+    1
 }
 
-fn eq_to_dest(_this: Position, _that: Position) -> bool {
-    _this == _that
+struct FindPlan<'a> {
+    cache: &'a Cache,
+    size_map: usize,
+    suitable: fn(&Cache, &Position) -> bool,
+    heuristic: fn(&Position) -> i32,
+}
+
+fn eq_to_zero(_cache: &Cache, _this: &Position) -> bool {
+    *_this == Position::new(0, 0)
 }
 
 impl<'a> FindPlan<'a> {
     fn new(
-        dest: Position,
-        world_map: &'a HashSet<Position>,
+        cache: &'a Cache,
         size_map: usize,
-        suitable: fn(Position, Position) -> bool,
+        suitable: fn(&Cache, &Position) -> bool,
+        heuristic: fn(&Position) -> i32,
     ) -> Self {
         Self {
-            dest: dest,
-            world_map: world_map,
+            cache: cache,
             size_map: size_map,
             suitable: suitable,
+            heuristic: heuristic,
         }
     }
 }
@@ -109,7 +113,7 @@ impl CostructSolution for FindPlan<'_> {
         for dir in [North, Sud, East, Ovest] {
             if state.possible_move(dir, self.size_map) {
                 let next_pos = state.move_clone(dir);
-                if self.world_map.contains(&next_pos) {
+                if self.cache.is_safe(&next_pos) {
                     result.push(next_pos);
                 }
             }
@@ -118,20 +122,20 @@ impl CostructSolution for FindPlan<'_> {
         result.into_iter()
     }
 
-    fn result(&self, state: &Self::State, action: &Self::Action) -> (Self::State, Self::Cost) {
+    fn result(&self, _state: &Self::State, action: &Self::Action) -> (Self::State, Self::Cost) {
         (*action, 1)
     }
 }
 
 impl Utility for FindPlan<'_> {
     fn heuristic(&self, state: &Self::State) -> Self::Cost {
-        h(state)
+        (self.heuristic)(state)
     }
 }
 
 impl SuitableState for FindPlan<'_> {
     fn is_suitable(&self, state: &Self::State) -> bool {
-        (self.suitable)(*state, self.dest)
+        (self.suitable)(self.cache, state)
     }
 }
 
@@ -176,7 +180,21 @@ impl<K> Hero<K> {
 
                     // Quindi va annullato il piano e va chiamata la funzione utility_go_home e ritornare l'utilità nuova trovata
 
-                    -1
+                    if let Some(plan) = self.plan.clone() {
+                        let pos = p.move_clone(direction);
+                        // let mut final_pos = false;
+                        for (i, pos2) in plan.iter().enumerate() {
+                            if *pos2 == pos {
+                                if i == plan.len() - 1 {
+                                    self.plan = None;
+                                }
+                                return -((plan.len() - i - 1) as i32);
+                            }
+                        }
+                        return i32::MIN;
+                    } else {
+                        panic!("There is no plan")
+                    }
                 } else {
                     1
                 }
@@ -188,12 +206,12 @@ impl<K> Hero<K> {
     }
 
     // ATTENZIONE: il piano potrebbe rimanere null se non ha trovato nessun piano
-    fn create_plan(&mut self, actual_position: Position, dest: Position) {
+    fn create_plan_to_go_home(&mut self, actual_position: Position) {
         assert!(self.plan.is_none());
 
         // crea una frontiera e i nodi esplorati
         let arena = Bump::new();
-        let problem = FindPlan::new(dest, &self.visited, self.size_map, eq_to_dest);
+        let problem = FindPlan::new(&self.cache, self.size_map, eq_to_zero, distance_to_zero);
         let mut resolver = AStarExplorer::new(&problem, &arena);
         let result = resolver.search(actual_position);
         if let Some(plan) = result.actions.as_ref() {
@@ -202,6 +220,36 @@ impl<K> Hero<K> {
             println!("[WARNING] The hero failed to find a plan");
         }
         self.plan = result.actions;
+    }
+
+    fn create_plan_gold(&mut self, actual_position: Position) {
+        assert!(self.plan.is_none());
+
+        // crea una frontiera e i nodi esplorati
+        let arena = Bump::new();
+        let problem = FindPlan::new(
+            &self.cache,
+            self.size_map,
+            Cache::safe_but_not_visited,
+            no_heuristic,
+        );
+        let mut resolver = BFSExplorer::new(&problem, &arena);
+        let result = resolver.search(actual_position);
+        if let Some(plan) = result.actions.as_ref() {
+            println!("[INFO] Plan generated: {:?}", plan);
+        } else {
+            println!("[WARNING] The hero failed to find a plan");
+        }
+        self.plan = result.actions;
+    }
+
+    // true se il piano è stato creato, false altrimenti
+    fn create_plan(&mut self, actual_position: Position) -> bool {
+        match self.obj {
+            Objective::TakeGold => self.create_plan_gold(actual_position),
+            Objective::GoHome => self.create_plan_to_go_home(actual_position),
+        };
+        self.plan.is_some()
     }
 
     fn utility_go_home(&mut self, a: &Action, p: &Position) -> i32 {
@@ -224,14 +272,7 @@ impl<K> Hero<K> {
 
         // Tutte le altre mosse hanno utilità -inf, tranne dell'azione Exit che avrà utilità +inf
 
-        if self.plan.is_none() {
-            self.create_plan(*p, Position::new(0, 0));
-            if self.plan.is_none() {
-                println!(
-                    "[FATAL ERROR] There is always a plan to (0,0) from the actual position, but the hero failed to find it"
-                );
-            }
-        }
+        assert!(self.plan.is_some());
 
         let plan = self.plan.as_ref().expect("The plan was found");
 
@@ -245,7 +286,11 @@ impl<K> Hero<K> {
                         break;
                     }
                 }
-                if found { -h(&next_pos) } else { i32::MIN }
+                if found {
+                    -distance_to_zero(&next_pos)
+                } else {
+                    i32::MIN
+                }
             }
             Action::Grab => i32::MAX,
             Action::Shoot(direction) => i32::MIN,
@@ -296,6 +341,7 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
         if p.glitter {
             action_to_consider.push(Grab);
             self.obj = Objective::GoHome;
+            println!("[INFO] Changed Plan,found gold,  go home");
         }
 
         // TODO: add arrow
@@ -321,6 +367,16 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
             }
         }
 
+        self.cache.visited.insert(p.position);
+        if self.plan.as_ref().map_or(true, |x| x.is_empty()) {
+            self.plan = None;
+            if !self.create_plan(p.position) {
+                self.obj = Objective::GoHome;
+                println!("[INFO] Changed Plan, go home");
+                assert!(self.create_plan(p.position))
+            }
+        }
+
         let mut best = None;
         let mut best_utility = i32::MIN;
         for action in suitable_actions {
@@ -337,7 +393,6 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
         if let Some(a) = best {
             // self.kb.tell(self.create_action_tell(&a));
             self.t += 1;
-            self.cache.visited.insert(p.position);
             return a;
         } else {
             println!("[ERROR] no action possible");
