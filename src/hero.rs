@@ -55,8 +55,19 @@ impl Cache {
     fn safe_but_not_visited(&self, p: &Position) -> bool {
         self.is_safe(p) && !self.is_visited(p)
     }
+
+    fn safe_neighbourhood(&self, p: &Position) -> bool {
+        use Direction::*;
+        for dir in [North, Sud, East, Ovest] {
+            if self.safe_but_not_visited(&p.move_clone(dir)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
+#[derive(PartialEq, Eq)]
 enum Objective {
     TakeGold,
     GoHome,
@@ -181,6 +192,7 @@ impl<K> Hero<K> {
                     // Quindi va annullato il piano e va chiamata la funzione utility_go_home e ritornare l'utilità nuova trovata
 
                     if let Some(plan) = self.plan.clone() {
+                        // assert!(!self.cache.safe_neighbourhood(p));
                         let pos = p.move_clone(direction);
                         // let mut final_pos = false;
                         for (i, pos2) in plan.iter().enumerate() {
@@ -193,7 +205,7 @@ impl<K> Hero<K> {
                         }
                         return i32::MIN;
                     } else {
-                        panic!("There is no plan")
+                        -1
                     }
                 } else {
                     1
@@ -246,7 +258,13 @@ impl<K> Hero<K> {
     // true se il piano è stato creato, false altrimenti
     fn create_plan(&mut self, actual_position: Position) -> bool {
         match self.obj {
-            Objective::TakeGold => self.create_plan_gold(actual_position),
+            Objective::TakeGold => {
+                if self.cache.safe_neighbourhood(&actual_position) {
+                    return true;
+                } else {
+                    self.create_plan_gold(actual_position);
+                }
+            }
             Objective::GoHome => self.create_plan_to_go_home(actual_position),
         };
         self.plan.is_some()
@@ -307,6 +325,62 @@ impl<K> Hero<K> {
 }
 
 impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
+    fn is_safe(&mut self, pos: Position, original_position: Position) -> bool {
+        if self.cache.is_safe(&pos) {
+            println!("[INFO] Cached Inference, SAFE position: {:?}", pos);
+            return true;
+        }
+        if self.cache.is_unsafe(&pos) {
+            println!("[INFO] Cached Inference, UNSAFE position: {:?}", pos);
+            return false;
+        }
+        let safe_formula = K::create_safe_formula(&pos);
+        if self.kb.ask(&safe_formula) {
+            self.kb.tell(&safe_formula);
+            self.cache.safe.insert(pos);
+            println!("[INFO] Inferred: {:?}", safe_formula);
+            true
+        } else {
+            let unsafe_formula = K::create_unsafe_formula(&pos);
+            if self.kb.ask(&unsafe_formula) {
+                println!("[INFO] Unsafe Position: {:?}", pos);
+                self.kb.tell(&unsafe_formula);
+                self.cache._unsafe.insert(pos.clone());
+                if self.kb.ask(&K::create_wumpus_formula(&pos)) {
+                    self.kb.tell(&K::create_wumpus_formula(&pos));
+                    println!("[INFO] Found the Wumpus: {:?}", pos);
+                    self.cache.wumpus = pos.into();
+                } else {
+                    println!("[INFO] Found a Pit: {:?}", pos);
+                    self.kb.tell(&K::create_pit_formula(&pos));
+                }
+                use Direction::*;
+                println!(
+                    "[INFO] searching for other inference, searching around the point: {:?}",
+                    pos
+                );
+                for dir in [North, Sud, East, Ovest] {
+                    println!("    searching: {:?}", pos.move_clone(dir));
+                    self.is_safe(pos.move_clone(dir), original_position);
+                }
+                println!(
+                    "[INFO] searching for other inference, searching around the ORIGINAL point: {:?}",
+                    original_position
+                );
+                for dir in [North, Sud, East, Ovest] {
+                    println!("    searching: {:?}", pos.move_clone(dir));
+                    self.is_safe(original_position.move_clone(dir), original_position);
+                }
+            } else {
+                println!(
+                    "[INFO] can't tell if the position {:?} is SAFE or UNSAFE",
+                    pos
+                );
+            }
+            false
+        }
+    }
+
     pub fn next_action(&mut self, p: Perceptions) -> Action {
         use crate::world::Action::*;
         use crate::world::Direction::*;
@@ -327,50 +401,72 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
         }
 
         for dir in [North, Sud, East, Ovest] {
-            if p.position.possible_move(dir, p.board_size)
-                && !self.cache.is_unsafe(&p.position.move_clone(dir))
-            {
-                if self.cache.is_safe(&p.position.move_clone(dir)) {
-                    suitable_actions.push(Move(dir));
+            if p.position.possible_move(dir, p.board_size) {
+                if !self.cache.is_unsafe(&p.position.move_clone(dir)) {
+                    if self.cache.is_safe(&p.position.move_clone(dir)) {
+                        println!(
+                            "[INFO] Cached Inference, SAFE position: {:?}",
+                            &p.position.move_clone(dir)
+                        );
+                        suitable_actions.push(Move(dir));
+                    } else {
+                        action_to_consider.push(Move(dir));
+                    }
                 } else {
-                    action_to_consider.push(Move(dir));
+                    println!(
+                        "[INFO] Cached Inference, UNSAFE position: {:?}",
+                        &p.position.move_clone(dir)
+                    );
                 }
             }
         }
 
         if p.glitter {
-            action_to_consider.push(Grab);
+            suitable_actions.push(Grab);
             self.obj = Objective::GoHome;
-            println!("[INFO] Changed Plan,found gold,  go home");
+            self.plan = None;
+            println!("[INFO] Changed Plan,found gold, go home");
         }
 
         // TODO: add arrow
 
         for a in action_to_consider {
-            let formula = K::create_query_from_action(&a, &p.position);
-            if self.kb.ask(&formula) {
-                println!("[INFO] Inferred: {:?}", formula);
-                suitable_actions.push(a);
-                self.kb.tell(&formula);
-                for pos in self.kb.safe_positions(formula).into_iter() {
-                    self.cache.safe.insert(pos);
-                }
-            } else {
-                match a {
-                    Move(dir) => {
-                        if self.kb.is_unsafe(p.position.move_clone(dir)) {
-                            self.cache._unsafe.insert(p.position.move_clone(dir));
-                        }
+            match a {
+                Move(direction) => {
+                    if self.is_safe(p.position.move_clone(direction), p.position.clone()) {
+                        suitable_actions.push(a);
                     }
-                    _ => {}
                 }
+                Grab => panic!("is already considered action grabbing the gold"),
+                Shoot(direction) => todo!(),
+                Exit => panic!("is already considered action exit the dangeon"),
             }
-        }
 
+            // let formula = K::create_query_from_action(&a, &p.position);
+            // if self.kb.ask(&formula) {
+            //     println!("[INFO] Inferred: {:?}", formula);
+            //     suitable_actions.push(a);
+            //     self.kb.tell(&formula);
+            //     for pos in self.kb.safe_positions(formula).into_iter() {
+            //         self.cache.safe.insert(pos);
+            //     }
+            // } else {
+            //     match a {
+            //         Move(dir) => {
+            //             if self.kb.is_unsafe(p.position.move_clone(dir)) {
+            //                 self.cache._unsafe.insert(p.position.move_clone(dir));
+            //             }
+            //         }
+            //         _ => {}
+            //     }
+            // }
+        }
+        assert!(self.cache.is_safe(&p.position));
         self.cache.visited.insert(p.position);
         if self.plan.as_ref().map_or(true, |x| x.is_empty()) {
             self.plan = None;
             if !self.create_plan(p.position) {
+                assert!(self.obj != Objective::GoHome);
                 self.obj = Objective::GoHome;
                 println!("[INFO] Changed Plan, go home");
                 assert!(self.create_plan(p.position))

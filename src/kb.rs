@@ -38,6 +38,10 @@ pub trait KnowledgeBase {
     fn consistency(&mut self) -> bool;
 
     fn create_query_from_action(a: &Action, p: &Position) -> Self::Query;
+    fn create_safe_formula(p: &Position) -> Self::Query;
+    fn create_unsafe_formula(p: &Position) -> Self::Query;
+    fn create_wumpus_formula(p: &Position) -> Self::Query;
+    fn create_pit_formula(p: &Position) -> Self::Query;
     fn create_ground_truth_from_perception(p: &Perceptions) -> Self::Query;
 
     fn is_unsafe(&mut self, p: Position) -> bool;
@@ -177,6 +181,26 @@ impl KnowledgeBase for EncoderSAT<Var> {
             }
         }
         result
+    }
+
+    fn create_safe_formula(p: &Position) -> Self::Query {
+        use Var::*;
+        vec![vec![Safe { pos: *p }.into()]]
+    }
+
+    fn create_unsafe_formula(p: &Position) -> Self::Query {
+        use Var::*;
+        vec![vec![Neg(Safe { pos: *p })]]
+    }
+
+    fn create_wumpus_formula(p: &Position) -> Self::Query {
+        use Var::*;
+        vec![vec![Wumpus { pos: *p }.into()]]
+    }
+
+    fn create_pit_formula(p: &Position) -> Self::Query {
+        use Var::*;
+        vec![vec![Pit { pos: *p }.into()]]
     }
 }
 
