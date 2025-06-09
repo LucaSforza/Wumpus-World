@@ -85,6 +85,7 @@ impl Position {
 
 pub struct World {
     dungeon: Vec<Vec<Option<Entity>>>,
+    gold_in_dungeon: bool,
     hero_pos: Position,
     arrow: bool,
 }
@@ -113,6 +114,7 @@ impl World {
             dungeon: dungeon,
             hero_pos: Position { x: 0, y: 0 },
             arrow: true,
+            gold_in_dungeon: true,
         }
     }
 
@@ -144,6 +146,7 @@ impl World {
         if self.there_is_gold(x, y) {
             p.glitter = true;
         }
+        // TODO: compatta
         if self.hero_pos.x != 0 {
             // controlla se ci sta qualcosa a sinistra
             if self.there_is_a_pit(x - 1, y) {
@@ -182,12 +185,25 @@ impl World {
     pub fn do_action(&mut self, action: Action) {
         match action {
             Action::Move(dir) => self.hero_pos.move_in(dir),
-            Action::Grab => self.dungeon[self.hero_pos.y][self.hero_pos.x] = None,
+            Action::Grab => {
+                if self.dungeon[self.hero_pos.y][self.hero_pos.x]
+                    .as_ref()
+                    .map_or(false, |x| *x != Entity::Gold)
+                {
+                    println!("[FATAL ERROR] The hero is trying to Grap the Gold where is no gold");
+                    exit(1)
+                }
+                self.gold_in_dungeon = false;
+                self.dungeon[self.hero_pos.y][self.hero_pos.x] = None
+            }
             Action::Shoot(dir) => todo!(),
             Action::Exit => {
                 if self.hero_pos == Position::new(0, 0) {
-                    // TODO: check if the hero took the gold
-                    println!("[SUCCESS] The Hero succesfuly exit the dungeon");
+                    if !self.gold_in_dungeon {
+                        println!("[SUCCESS] The Hero succesfuly exit the dungeon WITH the gold");
+                    } else {
+                        println!("[SUCCESS] The Hero succesfuly exit the dungeon WITHOUT the gold")
+                    }
                     exit(0);
                 } else {
                     println!(
