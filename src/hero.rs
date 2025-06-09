@@ -16,6 +16,47 @@ use agent::{
 
 use agent::problem::CostructSolution;
 
+#[derive(Default)]
+struct Cache {
+    visited: HashSet<Position>,
+    safe: HashSet<Position>,
+    _unsafe: HashSet<Position>,
+    wumpus: Option<Position>,
+}
+
+impl Cache {
+    fn new() -> Self {
+        let mut safe = HashSet::new();
+        safe.insert(Position::new(0, 0));
+        Self {
+            safe: safe,
+            visited: Default::default(),
+            _unsafe: Default::default(),
+            wumpus: Default::default(),
+        }
+    }
+
+    fn is_safe(&self, p: &Position) -> bool {
+        self.safe.contains(p)
+    }
+
+    fn is_unsafe(&self, p: &Position) -> bool {
+        self._unsafe.contains(p)
+    }
+
+    fn is_visited(&self, p: &Position) -> bool {
+        self.visited.contains(p)
+    }
+
+    fn there_is_the_wumpus(&self, p: &Position) -> bool {
+        self.is_unsafe(p) && self.wumpus.map_or(false, |x| x == *p)
+    }
+
+    fn safe_but_not_visited(&self, p: &Position) -> bool {
+        self.is_safe(p) && !self.is_visited(p)
+    }
+}
+
 enum Objective {
     TakeGold,
     GoHome,
@@ -98,9 +139,7 @@ pub struct Hero<K> {
     kb: K,
     obj: Objective,
     t: usize, // time
-    visited: HashSet<Position>,
-    dangeours: HashSet<Position>,
-    safe: HashSet<Position>,
+    cache: Cache,
     rng: ThreadRng,
     plan: Option<Vec<Position>>,
     size_map: usize,
@@ -108,14 +147,10 @@ pub struct Hero<K> {
 
 impl<K> Hero<K> {
     pub fn new(kb: K, size_map: usize) -> Self {
-        let mut safe = HashSet::new();
-        safe.insert(Position::new(0, 0));
         Self {
             kb: kb,
             t: 0,
-            visited: HashSet::new(),
-            dangeours: HashSet::new(),
-            safe: safe,
+            cache: Cache::new(),
             rng: rand::rng(),
             obj: Objective::TakeGold,
             plan: None,
@@ -126,7 +161,7 @@ impl<K> Hero<K> {
     fn utility_take_gold(&mut self, a: &Action, p: &Position) -> i32 {
         match *a {
             Action::Move(direction) => {
-                if self.visited.contains(&p.move_clone(direction)) {
+                if self.cache.is_visited(&p.move_clone(direction)) {
                     // costruisci un piano che dalla posizione corrente si sposta in una casella safe non ancora visitata
                     // l'utilità di questa mossa sarà la lunghezza del piano negativa
 
@@ -248,9 +283,9 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
 
         for dir in [North, Sud, East, Ovest] {
             if p.position.possible_move(dir, p.board_size)
-                && !self.dangeours.contains(&p.position.move_clone(dir))
+                && !self.cache.is_unsafe(&p.position.move_clone(dir))
             {
-                if self.safe.contains(&p.position.move_clone(dir)) {
+                if self.cache.is_safe(&p.position.move_clone(dir)) {
                     suitable_actions.push(Move(dir));
                 } else {
                     action_to_consider.push(Move(dir));
@@ -272,13 +307,13 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
                 suitable_actions.push(a);
                 self.kb.tell(&formula);
                 for pos in self.kb.safe_positions(formula).into_iter() {
-                    self.safe.insert(pos);
+                    self.cache.safe.insert(pos);
                 }
             } else {
                 match a {
                     Move(dir) => {
                         if self.kb.is_unsafe(p.position.move_clone(dir)) {
-                            self.dangeours.insert(p.position.move_clone(dir));
+                            self.cache._unsafe.insert(p.position.move_clone(dir));
                         }
                     }
                     _ => {}
@@ -302,7 +337,7 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
         if let Some(a) = best {
             // self.kb.tell(self.create_action_tell(&a));
             self.t += 1;
-            self.visited.insert(p.position);
+            self.cache.visited.insert(p.position);
             return a;
         } else {
             println!("[ERROR] no action possible");
