@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt, process::exit};
+use std::{collections::HashSet, fmt, process::exit, ptr::eq};
 
 use bumpalo::Bump;
 use rand::{Rng, rngs::ThreadRng};
@@ -29,14 +29,25 @@ struct FindPlan<'a> {
     dest: Position,
     world_map: &'a HashSet<Position>,
     size_map: usize,
+    suitable: fn(Position, Position) -> bool,
+}
+
+fn eq_to_dest(_this: Position, _that: Position) -> bool {
+    _this == _that
 }
 
 impl<'a> FindPlan<'a> {
-    fn new(dest: Position, world_map: &'a HashSet<Position>, size_map: usize) -> Self {
+    fn new(
+        dest: Position,
+        world_map: &'a HashSet<Position>,
+        size_map: usize,
+        suitable: fn(Position, Position) -> bool,
+    ) -> Self {
         Self {
             dest: dest,
             world_map: world_map,
             size_map: size_map,
+            suitable: suitable,
         }
     }
 }
@@ -79,7 +90,7 @@ impl Utility for FindPlan<'_> {
 
 impl SuitableState for FindPlan<'_> {
     fn is_suitable(&self, state: &Self::State) -> bool {
-        state.x == self.dest.x && state.y == self.dest.y
+        (self.suitable)(*state, self.dest)
     }
 }
 
@@ -116,9 +127,23 @@ impl<K> Hero<K> {
         match *a {
             Action::Move(direction) => {
                 if self.visited.contains(&p.move_clone(direction)) {
+                    // costruisci un piano che dalla posizione corrente si sposta in una casella safe non ancora visitata
+                    // l'utilità di questa mossa sarà la lunghezza del piano negativa
+
+                    // il piano utilizzerà BFS perché non mi viene in mente nessuna euristica consistente per questo problema :(
+                    // il costo di una qualsiasi mossa sarà 1, quindi la BFS troverà il piano ottimo
+
+                    // per il principio di ottimalità l'agente continuerà a seguire il path ottimo
+                    // anche al prossimo turno
+
+                    // se un piano non esiste allora vuol dire che non possiamo continuare ad esplorare il dungeon
+                    // in sicurezza, quindi siamo costretti a cambiare obbiettivo e tornare a casa senza l'oro
+
+                    // Quindi va annullato il piano e va chiamata la funzione utility_go_home e ritornare l'utilità nuova trovata
+
                     -1
                 } else {
-                    0
+                    1
                 }
             }
             Action::Grab => i32::MAX,
@@ -133,7 +158,7 @@ impl<K> Hero<K> {
 
         // crea una frontiera e i nodi esplorati
         let arena = Bump::new();
-        let problem = FindPlan::new(dest, &self.visited, self.size_map);
+        let problem = FindPlan::new(dest, &self.visited, self.size_map, eq_to_dest);
         let mut resolver = AStarExplorer::new(&problem, &arena);
         let result = resolver.search(actual_position);
         if let Some(plan) = result.actions.as_ref() {
@@ -185,7 +210,7 @@ impl<K> Hero<K> {
                         break;
                     }
                 }
-                if found { h(&next_pos) } else { i32::MIN }
+                if found { -h(&next_pos) } else { i32::MIN }
             }
             Action::Grab => i32::MAX,
             Action::Shoot(direction) => i32::MIN,

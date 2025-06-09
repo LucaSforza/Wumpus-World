@@ -6,8 +6,8 @@ mod world;
 use crate::{hero::Hero, kb::init_kb, world::World};
 
 fn main() {
-    let dim = 25;
-    let mut world = World::new(dim, 35);
+    let dim = 5;
+    let mut world = World::new(dim, 3);
     let mut hero = Hero::new(init_kb(dim), dim);
     print!("{}", world);
     for _ in 0..100 {
