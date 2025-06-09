@@ -10,7 +10,7 @@ enum Entity {
     Gold,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Action {
     Move(Direction),
     Grab,

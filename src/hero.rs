@@ -203,9 +203,9 @@ impl<K> Hero<K> {
                                 return -((plan.len() - i - 1) as i32);
                             }
                         }
-                        return i32::MIN;
+                        return i32::MIN + 1;
                     } else {
-                        -1
+                        i32::MIN
                     }
                 } else {
                     1
@@ -360,16 +360,20 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
                     pos
                 );
                 for dir in [North, Sud, East, Ovest] {
-                    println!("    searching: {:?}", pos.move_clone(dir));
-                    self.is_safe(pos.move_clone(dir), original_position);
+                    if pos.possible_move(dir, self.size_map) {
+                        println!("    searching: {:?}", pos.move_clone(dir));
+                        self.is_safe(pos.move_clone(dir), original_position);
+                    }
                 }
                 println!(
                     "[INFO] searching for other inference, searching around the ORIGINAL point: {:?}",
                     original_position
                 );
                 for dir in [North, Sud, East, Ovest] {
-                    println!("    searching: {:?}", pos.move_clone(dir));
-                    self.is_safe(original_position.move_clone(dir), original_position);
+                    if original_position.possible_move(dir, self.size_map) {
+                        println!("    searching: {:?}", pos.move_clone(dir));
+                        self.is_safe(original_position.move_clone(dir), original_position);
+                    }
                 }
             } else {
                 println!(
@@ -473,11 +477,15 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
             }
         }
 
-        let mut best = None;
-        let mut best_utility = i32::MIN;
-        for action in suitable_actions {
+        println!("[INFO] Suitable actions: {:?}", suitable_actions);
+
+        let mut best = suitable_actions.get(0);
+        let mut best_utility = best.map_or(i32::MIN, |x| self.utility(x, &p.position));
+        for action in &suitable_actions {
             let new_utility = self.utility(&action, &p.position);
-            if new_utility > best_utility {
+            if new_utility > best_utility
+            /* || (best_utility == i32::MIN && new_utility == i32::MIN) */
+            {
                 best = action.into();
                 best_utility = new_utility;
             } else if new_utility == best_utility {
@@ -486,10 +494,19 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
                 }
             }
         }
+
+        if best_utility == i32::MIN || best_utility == i32::MIN + 1 {
+            println!("[WARNING] not good actions");
+            self.plan = None;
+            self.create_plan(p.position);
+            return self.next_action(p);
+        }
+
         if let Some(a) = best {
             // self.kb.tell(self.create_action_tell(&a));
+            println!("[INFO] Action choosen: {:?}", a);
             self.t += 1;
-            return a;
+            return *a;
         } else {
             println!("[ERROR] no action possible");
             exit(1);
