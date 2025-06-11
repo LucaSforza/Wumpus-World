@@ -182,7 +182,8 @@ impl World {
         p
     }
 
-    pub fn do_action(&mut self, action: Action) {
+    // true se finisce la simulazione, il secondo booleano è se ha trovato l'oro oppure no
+    pub fn do_action(&mut self, action: Action) -> (bool, bool) {
         match action {
             Action::Move(dir) => self.hero_pos.move_in(dir),
             Action::Grab => {
@@ -204,7 +205,7 @@ impl World {
                     } else {
                         println!("[SUCCESS] The Hero succesfuly exit the dungeon WITHOUT the gold")
                     }
-                    exit(0);
+                    return (true, !self.gold_in_dungeon);
                 } else {
                     println!(
                         "[FATAL ERROR] The agent exited the dangeon in the position: {:?} But he can exit only in the position (0,0)",
@@ -223,6 +224,7 @@ impl World {
             println!("[ERROR] The hero is dead");
             exit(1);
         }
+        return (false, false);
     }
 }
 

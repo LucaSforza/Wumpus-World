@@ -1,3 +1,3 @@
 #!/bin/sh
 
-cargo run --release -- $@ > run.txt
+cargo run --release -- $@ 

@@ -22,10 +22,11 @@ struct Cache {
     safe: HashSet<Position>,
     _unsafe: HashSet<Position>,
     wumpus: Option<Position>,
+    map_size: usize,
 }
 
 impl Cache {
-    fn new() -> Self {
+    fn new(map_size: usize) -> Self {
         let mut safe = HashSet::new();
         safe.insert(Position::new(0, 0));
         Self {
@@ -33,6 +34,7 @@ impl Cache {
             visited: Default::default(),
             _unsafe: Default::default(),
             wumpus: Default::default(),
+            map_size: map_size,
         }
     }
 
@@ -59,7 +61,8 @@ impl Cache {
     fn safe_neighbourhood(&self, p: &Position) -> bool {
         use Direction::*;
         for dir in [North, Sud, East, Ovest] {
-            if self.safe_but_not_visited(&p.move_clone(dir)) {
+            if p.possible_move(dir, self.map_size) && self.safe_but_not_visited(&p.move_clone(dir))
+            {
                 return true;
             }
         }
@@ -165,7 +168,7 @@ impl<K> Hero<K> {
         Self {
             kb: kb,
             t: 0,
-            cache: Cache::new(),
+            cache: Cache::new(size_map),
             rng: rand::rng(),
             obj: Objective::TakeGold,
             plan: None,
@@ -298,14 +301,16 @@ impl<K> Hero<K> {
             Action::Move(direction) => {
                 let mut found = false;
                 let next_pos = p.move_clone(direction);
-                for pos in plan {
+                let mut index = None;
+                for (i, pos) in plan.iter().enumerate() {
                     if *pos == next_pos {
                         found = true;
+                        index = i.into();
                         break;
                     }
                 }
                 if found {
-                    -distance_to_zero(&next_pos)
+                    index.unwrap() as i32
                 } else {
                     i32::MIN
                 }
@@ -354,27 +359,27 @@ impl<K: KnowledgeBase<Query: fmt::Debug>> Hero<K> {
                     println!("[INFO] Found a Pit: {:?}", pos);
                     self.kb.tell(&K::create_pit_formula(&pos));
                 }
-                use Direction::*;
-                println!(
-                    "[INFO] searching for other inference, searching around the point: {:?}",
-                    pos
-                );
-                for dir in [North, Sud, East, Ovest] {
-                    if pos.possible_move(dir, self.size_map) {
-                        println!("    searching: {:?}", pos.move_clone(dir));
-                        self.is_safe(pos.move_clone(dir), original_position);
-                    }
-                }
-                println!(
-                    "[INFO] searching for other inference, searching around the ORIGINAL point: {:?}",
-                    original_position
-                );
-                for dir in [North, Sud, East, Ovest] {
-                    if original_position.possible_move(dir, self.size_map) {
-                        println!("    searching: {:?}", pos.move_clone(dir));
-                        self.is_safe(original_position.move_clone(dir), original_position);
-                    }
-                }
+                // use Direction::*;
+                // println!(
+                //     "[INFO] searching for other inference, searching around the point: {:?}",
+                //     pos
+                // );
+                // for dir in [North, Sud, East, Ovest] {
+                //     if pos.possible_move(dir, self.size_map) {
+                //         println!("    searching: {:?}", pos.move_clone(dir));
+                //         self.is_safe(pos.move_clone(dir), original_position);
+                //     }
+                // }
+                // println!(
+                //     "[INFO] searching for other inference, searching around the ORIGINAL point: {:?}",
+                //     original_position
+                // );
+                // for dir in [North, Sud, East, Ovest] {
+                //     if original_position.possible_move(dir, self.size_map) {
+                //         println!("    searching: {:?}", pos.move_clone(dir));
+                //         self.is_safe(original_position.move_clone(dir), original_position);
+                //     }
+                // }
             } else {
                 println!(
                     "[INFO] can't tell if the position {:?} is SAFE or UNSAFE",
